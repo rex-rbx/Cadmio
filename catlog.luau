@@ -11,6 +11,8 @@ local Settings = {
     out = "out.lua",
     timeout = 60,
     ipt = nil :: string?,
+    beautify = true,
+    inline = true,
 }
 for _, arg in process.args do
     local k, v = string.match(arg, "([%w_]+)=(.+)")
@@ -23,6 +25,8 @@ end
 
 local lines = {}
 local varCount = 0
+local usedVars = {}
+
 local function emit(text: string)
     table.insert(lines, text)
 end
@@ -31,22 +35,73 @@ local function genVar(prefix: string?): string
     return (prefix or "v") .. tostring(varCount)
 end
 
+local function isProxy(v: any): boolean
+    return type(v) == "table" and getmetatable(v) ~= nil and getmetatable(v)._isProxy == true
+end
+
+local function proxyName(v: any): string
+    if isProxy(v) then return getmetatable(v)._name or "proxy" end
+    return "nil"
+end
+
+local function proxyParent(v: any): any?
+    if isProxy(v) then return getmetatable(v)._parent end
+    return nil
+end
+
+local function proxyField(v: any): string?
+    if isProxy(v) then return getmetatable(v)._fieldName end
+    return nil
+end
+
+local function markUsed(v: any)
+    if not isProxy(v) then return end
+    local mt = getmetatable(v)
+    usedVars[mt._name] = true
+    if mt._parent then
+        markUsed(mt._parent)
+    end
+end
+
 local serialize: (any, number?) -> string
 function serialize(value: any, depth: number?): string
     depth = depth or 0
-    if depth > 5 then return "nil" end
+    if depth > 6 then return "nil" end
     local t = typeof(value)
     if t == "nil" then return "nil"
     elseif t == "boolean" then return value and "true" or "false"
-    elseif t == "number" then return tostring(value)
+    elseif t == "number" then
+        if value ~= value then return "0/0"
+        elseif value == math.huge then return "math.huge"
+        elseif value == -math.huge then return "-math.huge" end
+        return tostring(value)
     elseif t == "string" then
         if #value > 200 then return string.format("[=[%s...]=]", string.sub(value, 1, 200)) end
         local escaped = string.gsub(value, "\\", "\\\\")
         escaped = string.gsub(escaped, "\"", "\\\"")
         escaped = string.gsub(escaped, "\n", "\\n")
+        escaped = string.gsub(escaped, "\r", "\\r")
+        escaped = string.gsub(escaped, "\t", "\\t")
         return '"' .. escaped .. '"'
     elseif t == "table" then
+        local m = getmetatable(value)
+        if m and m._isProxy then
+            markUsed(value)
+            return m._name
+        end
         local parts = {}
+        local isArray = true
+        local count = 0
+        for k, v in pairs(value) do
+            count += 1
+            if type(k) ~= "number" then isArray = false end
+        end
+        if isArray and count > 0 then
+            for i = 1, #value do
+                table.insert(parts, serialize(value[i], depth + 1))
+            end
+            return "{" .. table.concat(parts, ", ") .. "}"
+        end
         for k, v in pairs(value) do
             local keyStr = if type(k) == "string" and string.match(k, "^[%a_][%w_]*$") then k else "[" .. serialize(k, depth + 1) .. "]"
             table.insert(parts, keyStr .. " = " .. serialize(v, depth + 1))
@@ -56,52 +111,136 @@ function serialize(value: any, depth: number?): string
     return "nil"
 end
 
--- universal permissive proxy
-local function makeProxy(name: string?): any
-    local pname = name or "proxy"
-    return setmetatable({}, {
-        __index = function(_, k)
-            return makeProxy(pname .. "." .. tostring(k))
-        end,
-        __newindex = function(_, k, v)
-            if type(v) == "function" then
-                emit(string.format('%s.%s = function() end', pname, tostring(k)))
-            else
-                emit(string.format('%s.%s = %s', pname, tostring(k), serialize(v)))
-            end
-        end,
-        __call = function(_, ...)
-            local args = { ... }
-            local parts = {}
-            for i = 1, select("#", ...) do
-                local a = args[i]
-                if type(a) == "table" and getmetatable(a) and getmetatable(a).__tostring then
-                    table.insert(parts, tostring(a))
-                else
-                    table.insert(parts, serialize(a))
-                end
-            end
-            emit(string.format('%s(%s)', pname, table.concat(parts, ", ")))
-            return makeProxy(pname .. ".ret")
-        end,
-        __tostring = function() return pname end,
-        __concat = function(a, b) return tostring(a) .. tostring(b) end,
-        __add = function() return makeProxy(pname .. "+") end,
-        __sub = function() return makeProxy(pname .. "-") end,
-        __mul = function() return makeProxy(pname .. "*") end,
-        __div = function() return makeProxy(pname .. "/") end,
-        __mod = function() return makeProxy(pname .. "%") end,
-        __pow = function() return makeProxy(pname .. "^") end,
-        __unm = function() return makeProxy(pname .. "-") end,
-        __len = function() return 0 end,
-        __eq = function() return false end,
-        __lt = function() return false end,
-        __le = function() return false end,
-        __iter = function() return function() return nil end end,
-    })
+local makeProxy: (string) -> any
+
+makeProxy = function(name: string): any
+    local children = {}
+    local mt = {
+        _name = name,
+        _isProxy = true,
+        _parent = nil,
+        _fieldName = nil,
+    }
+    mt.__index = function(t, k)
+        local ks = tostring(k)
+        if not children[ks] then
+            local child = makeProxy(name .. "." .. ks)
+            local cmt = getmetatable(child)
+            cmt._parent = t
+            cmt._fieldName = ks
+            children[ks] = child
+        end
+        return children[ks]
+    end
+    mt.__newindex = function(t, k, v)
+        local ks = tostring(k)
+        if isProxy(v) then
+            markUsed(v)
+            emit(string.format('%s.%s = %s', name, ks, proxyName(v)))
+        elseif type(v) == "function" then
+            emit(string.format('%s.%s = function() end', name, ks))
+        else
+            emit(string.format('%s.%s = %s', name, ks, serialize(v)))
+        end
+    end
+    mt.__call = function(t, ...)
+        local args = {...}
+        local n = select("#", ...)
+        local parts = {}
+        local callExpr
+        local startIdx = 1
+
+        local cmt = getmetatable(t)
+        local parent = cmt._parent
+        if parent and rawequal(args[1], parent) then
+            callExpr = proxyName(parent) .. ":" .. cmt._fieldName
+            markUsed(parent)
+            startIdx = 2
+        else
+            callExpr = name
+        end
+
+        for i = startIdx, n do
+            table.insert(parts, serialize(args[i]))
+        end
+
+        local retName = genVar("v")
+        emit(string.format('local %s = %s(%s)', retName, callExpr, table.concat(parts, ", ")))
+        return makeProxy(retName)
+    end
+    mt.__tostring = function() return name end
+    mt.__concat = function(a, b)
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
+        local retName = genVar("v")
+        emit(string.format('local %s = %s .. %s', retName, sa, sb))
+        return makeProxy(retName)
+    end
+    mt.__add = function(a, b)
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
+        local retName = genVar("v")
+        emit(string.format('local %s = %s + %s', retName, sa, sb))
+        return makeProxy(retName)
+    end
+    mt.__sub = function(a, b)
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
+        local retName = genVar("v")
+        emit(string.format('local %s = %s - %s', retName, sa, sb))
+        return makeProxy(retName)
+    end
+    mt.__mul = function(a, b)
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
+        local retName = genVar("v")
+        emit(string.format('local %s = %s * %s', retName, sa, sb))
+        return makeProxy(retName)
+    end
+    mt.__div = function(a, b)
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
+        local retName = genVar("v")
+        emit(string.format('local %s = %s / %s', retName, sa, sb))
+        return makeProxy(retName)
+    end
+    mt.__mod = function(a, b)
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
+        local retName = genVar("v")
+        emit(string.format('local %s = %s %% %s', retName, sa, sb))
+        return makeProxy(retName)
+    end
+    mt.__pow = function(a, b)
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
+        local retName = genVar("v")
+        emit(string.format('local %s = %s ^ %s', retName, sa, sb))
+        return makeProxy(retName)
+    end
+    mt.__unm = function(a)
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        markUsed(a)
+        local retName = genVar("v")
+        emit(string.format('local %s = -%s', retName, sa))
+        return makeProxy(retName)
+    end
+    mt.__len = function() return 0 end
+    mt.__eq = function() return false end
+    mt.__lt = function() return false end
+    mt.__le = function() return false end
+    mt.__iter = function() return function() return nil end end
+
+    return setmetatable({}, mt)
 end
 
--- spyInstance: emits Instance.new + returns makeProxy for full permissiveness
 local function spyInstance(className: string, name: string?): any
     local varName = name or genVar("inst")
     emit(string.format('local %s = Instance.new("%s")', varName, className))
@@ -112,7 +251,6 @@ local env
 local function createEnv()
     env = {}
     env._G = env; env._ENV = env
-    -- copy stdlib
     local function copyLib(lib)
         local c = {}
         for k, v in pairs(lib) do c[k] = v end
@@ -138,21 +276,20 @@ local function createEnv()
         local t = type(x)
         if t == "table" then
             local m = getmetatable(x)
-            if m and m.__tostring then return "Instance" end
+            if m and m._isProxy then return "Instance" end
         end
         return t
     end
-    env.print = function(...) local a={...} local p={} for i=1,select("#",...) do p[i]=tostring(a[i]) end emit("print(" .. table.concat(p, ", ") .. ")") end
+    env.print = function(...)
+        local a={...}
+        local p={}
+        for i=1,select("#",...) do p[i]=serialize(a[i]) end
+        emit("print(" .. table.concat(p, ", ") .. ")")
+    end
     env.warn = env.print
     env.setfenv = function(f) return f end
     env.getfenv = function() return env end
-    env.loadstring = function()
-        emit("-- loadstring()")
-        return function()
-            emit("loadstring_ret()")
-            return makeProxy("loadstring_ret")
-        end
-    end
+    env.loadstring = makeProxy("loadstring")
     env.load = env.loadstring
 
     env.game = spyInstance("DataModel", "game")
@@ -164,17 +301,20 @@ local function createEnv()
     env.Instance = setmetatable({
         new = function(c)
             local cls = tostring(c or "Instance")
-            emit('local inst = Instance.new("' .. cls .. '")')
-            return spyInstance(cls)
+            local v = genVar("inst")
+            emit(string.format('local %s = Instance.new("%s")', v, cls))
+            return makeProxy(v)
         end,
     }, { __index = function(_, k) return makeProxy("Instance." .. tostring(k)) end })
     env.Enum = setmetatable({}, { __index = function(_, k) return makeProxy("Enum." .. tostring(k)) end })
     env.Enums = env.Enum
 
-    -- pure Lua replacements for Roblox types
     local function newCtor(name)
-        return setmetatable({ new = function(...) return makeProxy(name) end },
-            { __index = function(_, k) return makeProxy(name .. "." .. tostring(k)) end })
+        return setmetatable({ new = function(...)
+            local v = genVar(name:lower())
+            emit(string.format('local %s = %s.new(...)', v, name))
+            return makeProxy(v)
+        end }, { __index = function(_, k) return makeProxy(name .. "." .. tostring(k)) end })
     end
     env.Vector3 = newCtor("Vector3")
     env.Vector2 = newCtor("Vector2")
@@ -182,9 +322,9 @@ local function createEnv()
     env.UDim2 = newCtor("UDim2")
     env.UDim = newCtor("UDim")
     env.Color3 = setmetatable({
-        new = function() return makeProxy("Color3") end,
-        fromRGB = function() return makeProxy("Color3") end,
-        fromHSV = function() return makeProxy("Color3") end,
+        new = function(...) local v = genVar("color"); emit(string.format('local %s = Color3.new(...)', v)); return makeProxy(v) end,
+        fromRGB = function(...) local v = genVar("color"); emit(string.format('local %s = Color3.fromRGB(...)', v)); return makeProxy(v) end,
+        fromHSV = function(...) local v = genVar("color"); emit(string.format('local %s = Color3.fromHSV(...)', v)); return makeProxy(v) end,
     }, { __index = function(_, k) return makeProxy("Color3." .. tostring(k)) end })
     env.Rect = newCtor("Rect")
     env.Ray = newCtor("Ray")
@@ -248,24 +388,89 @@ local function createEnv()
     env.crypt = setmetatable({}, { __index = function(_, k) return function() return makeProxy("crypt." .. tostring(k)) end end })
     env.base64 = { encode = function(s) return s or "" end, decode = function(s) return s or "" end }
     env.syn = setmetatable({}, { __index = function(_, k) return makeProxy("syn." .. tostring(k)) end })
-
-    -- CRITICAL: override process.exit and other dangerous globals
-    -- because Lune exposes process as a global and the script may call process.exit
     env.process = setmetatable({
         exit = function() emit("-- process.exit() called") end,
-        args = {},
-        env = {},
-        cwd = function() return "/" end,
-        os = "linux",
-        pid = 1,
+        args = {}, env = {}, cwd = function() return "/" end, os = "linux", pid = 1,
     }, { __index = function(_, k) return makeProxy("process." .. tostring(k)) end })
 
     return env
 end
 
+local function deadCodeElimination()
+    local result = {}
+    for _, line in ipairs(lines) do
+        local v = string.match(line, "^local ([%a_][%w_]*%d+) = (.+)$")
+        if v and (usedVars[v] or 0) == 0 then
+            table.insert(result, string.match(line, "^local [%a_][%w_]*%d+ = (.+)$"))
+        else
+            table.insert(result, line)
+        end
+    end
+    lines = result
+end
+
+local function inlineVars()
+    if not Settings.inline then return end
+    local maxIter = 100
+    while maxIter > 0 do
+        maxIter -= 1
+
+        local useCount = {}
+        local defIdx = {}
+        local defExpr = {}
+        for i, line in ipairs(lines) do
+            local v, expr = string.match(line, "^local ([%a_][%w_]*%d+) = (.+)$")
+            if v then
+                defIdx[v] = i
+                defExpr[v] = expr
+            end
+            for var in string.gmatch(line, "[%a_][%w_]*%d+") do
+                if var ~= v then
+                    useCount[var] = (useCount[var] or 0) + 1
+                end
+            end
+        end
+
+        local bestVar = nil
+        local bestIdx = 0
+        for v, idx in pairs(defIdx) do
+            if (useCount[v] or 0) == 1 and idx > bestIdx then
+                local expr = defExpr[v]
+                if #expr < 200 and not expr:match("^function") and not expr:match("^%{") then
+                    bestVar = v
+                    bestIdx = idx
+                end
+            end
+        end
+
+        if not bestVar then break end
+
+        local expr = defExpr[bestVar]
+        local pattern = "%f[%w_]" .. bestVar .. "%f[^%w_]"
+        local newLines = {}
+        for i, line in ipairs(lines) do
+            if i == bestIdx then
+            else
+                table.insert(newLines, (string.gsub(line, pattern, expr)))
+            end
+        end
+        lines = newLines
+    end
+end
+
+local function beautify()
+    if not Settings.beautify then return end
+    local result = {}
+    for _, line in ipairs(lines) do
+        table.insert(result, line)
+    end
+    lines = result
+end
+
 local function dump(source: string): string
     lines = {}
     varCount = 0
+    usedVars = {}
     emit("-- EnvLog output")
     emit("")
     local env = createEnv()
@@ -283,13 +488,35 @@ local function dump(source: string): string
     if not ok then
         emit(string.format("-- Runtime error: %s", tostring(err):sub(1, 300)))
     end
+
+    inlineVars()
+    deadCodeElimination()
+    beautify()
     return table.concat(lines, "\n")
 end
 
 if Settings.ipt then
+    local ok, err = pcall(function()
+        if not fs.isFile(Settings.ipt) then
+            error("File not found: " .. Settings.ipt)
+        end
+    end)
+    if not ok then
+        stdio.write("Error: " .. tostring(err) .. "\n")
+        process.exit(1)
+    end
     local source = fs.readFile(Settings.ipt)
     local result = dump(source)
     fs.writeFile(Settings.out, result)
     stdio.write(string.format("Done! Output: %s (%d bytes, %d lines)\n", Settings.out, #result, #lines))
     process.exit(0)
+end
+
+while true do
+    local input = stdio.readLine()
+    if not input or input == "" then break end
+    local decoded = serde.decode("json", input)
+    local result = dump(decoded.script)
+    stdio.write(result)
+    stdio.write("\n---END---\n")
 end
