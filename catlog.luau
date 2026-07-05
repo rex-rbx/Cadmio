@@ -33,6 +33,9 @@ end
 local lines = {}
 local varCount = 0
 local usedVars = {}
+local opCount = 0
+local OP_BUDGET = 5000
+local BUDGET_ERROR = "__OP_BUDGET_EXCEEDED__"
 
 local function emit(text: string)
     table.insert(lines, text)
@@ -40,6 +43,13 @@ end
 local function genVar(prefix: string?): string
     varCount += 1
     return (prefix or "v") .. tostring(varCount)
+end
+
+local function tick()
+    opCount += 1
+    if opCount > OP_BUDGET then
+        error(BUDGET_ERROR, 0)
+    end
 end
 
 local function isProxy(v: any): boolean
@@ -158,6 +168,7 @@ makeProxy = function(name: string): any
         _descriptive = false,
     }
     mt.__index = function(t, k)
+        tick()
         local ks = tostring(k)
         if not children[ks] then
             local child = makeProxy(name .. "." .. ks)
@@ -169,6 +180,7 @@ makeProxy = function(name: string): any
         return children[ks]
     end
     mt.__newindex = function(t, k, v)
+        tick()
         local ks = tostring(k)
         if isProxy(v) then
             markUsed(v)
@@ -180,6 +192,7 @@ makeProxy = function(name: string): any
         end
     end
     mt.__call = function(t, ...)
+        tick()
         local args = {...}
         local n = select("#", ...)
         local parts = {}
@@ -195,6 +208,10 @@ makeProxy = function(name: string): any
             startIdx = 2
         else
             callExpr = name
+        end
+
+        if _G._yieldTick and (fieldName == "Wait" or fieldName == "wait") then
+            _G._yieldTick()
         end
 
         for i = startIdx, n do
@@ -397,17 +414,35 @@ local function createEnv()
     }, { __index = function() return function() end end })
     env.Buffer = env.buffer
 
+    local YIELD_BUDGET = 1
+    local yieldCount = 0
+    local function yieldTick()
+        yieldCount += 1
+        if yieldCount > YIELD_BUDGET then
+            error(BUDGET_ERROR, 0)
+        end
+    end
+    _G._yieldTick = yieldTick
+    local function runCallback(f, ...)
+        if type(f) ~= "function" then return end
+        local savedYieldCount = yieldCount
+        yieldCount = 0
+        local ok, err = pcall(f, ...)
+        yieldCount = savedYieldCount
+        if not ok and tostring(err):find(BUDGET_ERROR, 1, true) then
+        end
+    end
     env.task = {
-        wait = function() return 0 end,
-        spawn = function(f, ...) end,
-        delay = function(t, f) end,
+        wait = function() yieldTick(); return 0 end,
+        spawn = function(f, ...) runCallback(f, ...) end,
+        delay = function(t, f) runCallback(f) end,
         cancel = function() end,
         clock = function() return os.clock() end,
-        defer = function(f, ...) end,
+        defer = function(f, ...) runCallback(f, ...) end,
         synchronize = function() end,
         desynchronize = function() end,
     }
-    env.wait = function() return 0 end
+    env.wait = function() yieldTick(); return 0 end
     env.spawn = env.task.spawn
     env.delay = env.task.delay
     env.tick = function() return os.time() end
@@ -515,8 +550,12 @@ end
 local function beautify()
     if not Settings.beautify then return end
     local result = {}
+    local lastLine = nil
     for _, line in ipairs(lines) do
-        table.insert(result, line)
+        if line ~= lastLine then
+            table.insert(result, line)
+            lastLine = line
+        end
     end
     lines = result
 end
@@ -540,7 +579,10 @@ local function dump(source: string): string
     end
     local ok, err = pcall(fn)
     if not ok then
-        emit(string.format("-- Runtime error: %s", tostring(err):sub(1, 300)))
+        local errStr = tostring(err)
+        if not errStr:find(BUDGET_ERROR, 1, true) then
+            emit(string.format("-- Runtime error: %s", errStr:sub(1, 300)))
+        end
     end
 
     inlineVars()
