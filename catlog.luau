@@ -16,7 +16,7 @@ local Settings = {
     out = "out.lua",
     hookOp = false,
     minifier = true,
-    timeout = 25,
+    timeout = 10,
     maxOps = 15_000_000,
     ipt = nil :: string?,
     debug = false,
@@ -190,8 +190,6 @@ local function spyInstance(inst: any, name: string?): any
                 return function(_, url: string?)
                     local urlStr = tostring(url or "")
                     emit(string.format('%s:HttpGet("%s")', varName, urlStr))
-                    local ok, response = pcall(net.request, urlStr)
-                    if ok and response and response.body then return response.body end
                     return ""
                 end
             end
@@ -199,8 +197,6 @@ local function spyInstance(inst: any, name: string?): any
                 return function(_, url: string?)
                     local urlStr = tostring(url or "")
                     emit(string.format('%s:HttpGetAsync("%s")', varName, urlStr))
-                    local ok, response = pcall(net.request, urlStr)
-                    if ok and response and response.body then return response.body end
                     return ""
                 end
             end
@@ -220,8 +216,6 @@ local function spyInstance(inst: any, name: string?): any
                 return function(_, url: string?)
                     local urlStr = tostring(url or "")
                     emit(string.format('%s:GetAsync("%s")', varName, urlStr))
-                    local ok, response = pcall(net.request, urlStr)
-                    if ok and response and response.body then return response.body end
                     return ""
                 end
             end
@@ -236,10 +230,6 @@ local function spyInstance(inst: any, name: string?): any
                     local urlStr = ""
                     if type(opts) == "table" then urlStr = tostring(opts.url or "") end
                     emit(string.format('%s:RequestAsync("%s")', varName, urlStr))
-                    local ok, response = pcall(net.request, opts)
-                    if ok and response then
-                        return { StatusCode = response.status or 200, Body = response.body or "", Success = true }
-                    end
                     return { StatusCode = 200, Body = "", Success = true }
                 end
             end
@@ -729,8 +719,12 @@ local function createEnv()
     env.script = spyInstance(Instance.new("LocalScript"), "script")
     env.task = {
         wait = function(t: number?) return 0 end,
-        delay = function(t: number?, fn: any) task.spawn(fn) end,
-        spawn = function(fn: any, ...) local co = coroutine.create(fn) coroutine.resume(co, ...) end,
+        delay = function(t: number?, fn: any) 
+            if fn then task.spawn(fn) end
+        end,
+        spawn = function(fn: any, ...)
+            if fn then task.spawn(fn, ...) end
+        end,
         cancel = function() end,
         clock = function() return os.clock() end,
         getElapsedTime = function() return os.clock() end,
@@ -844,21 +838,13 @@ local function dump(source: string): string
     local timedOut = false
     task.delay(Settings.timeout, function()
         timedOut = true
+        local partial = table.concat(lines, "\n")
+        fs.writeFile(Settings.out, partial .. "\n-- Timeout: partial output\n")
+        process.exit(0)
     end)
     local ok, err = pcall(fn)
     if not ok then
         emit(string.format("-- Runtime error: %s", tostring(err):sub(1, 300)))
-        local tb = debug.traceback(tostring(err), 1)
-        if tb then
-            for line in string.gmatch(tb, "[^\n]+") do
-                if #line > 0 and #line < 200 then
-                    emit(string.format("--   %s", line))
-                end
-            end
-        end
-    end
-    if timedOut then
-        emit("-- Timeout reached, output may be partial")
     end
     return table.concat(lines, "\n")
 end
