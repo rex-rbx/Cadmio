@@ -189,6 +189,26 @@ local classParents = {
     NetworkClient = {"NetworkClient", "Instance"},
     ClientReplicator = {"ClientReplicator", "Instance"},
 }
+end
+
+game.GetService = function(self, serviceName)
+    if serviceName == "VoiceChatService" then
+        return {
+            joinVoice = function() end,
+            rejoinVoice = function() end,
+            leaveVoice = function() end
+        }
+    end
+    if serviceName == "SoundService" then
+        return {
+            GetAudioInstances = function() return {} end,
+            GetInputDevices = function() return {} end,
+            GetOutputDevices = function() return {} end
+        }
+    end
+    return oldGetService(self, serviceName)
+end
+
 local lines = {}
 local varCount = 0
 local usedVars = {}
