@@ -190,24 +190,34 @@ local classParents = {
     ClientReplicator = {"ClientReplicator", "Instance"},
 }
 
-local oldGetService = game.GetService
+local _game = game
+if _game == nil and roblox ~= nil then
+    local ok, resolved = pcall(function() return (roblox).game end)
+    if ok then _game = resolved end
+end
 
-game.GetService = function(self, serviceName)
-    if serviceName == "VoiceChatService" then
-        return {
-            joinVoice = function() end,
-            rejoinVoice = function() end,
-            leaveVoice = function() end
-        }
+print("hi") -- dump print: confirms we got past old line 193
+
+if _game ~= nil then
+    local oldGetService = _game.GetService
+
+    _game.GetService = function(self, serviceName)
+        if serviceName == "VoiceChatService" then
+            return {
+                joinVoice = function() end,
+                rejoinVoice = function() end,
+                leaveVoice = function() end
+            }
+        end
+        if serviceName == "SoundService" then
+            return {
+                GetAudioInstances = function() return {} end,
+                GetInputDevices = function() return {} end,
+                GetOutputDevices = function() return {} end
+            }
+        end
+        return oldGetService(self, serviceName)
     end
-    if serviceName == "SoundService" then
-        return {
-            GetAudioInstances = function() return {} end,
-            GetInputDevices = function() return {} end,
-            GetOutputDevices = function() return {} end
-        }
-    end
-    return oldGetService(self, serviceName)
 end
 
 local lines = {}
