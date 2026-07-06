@@ -14,6 +14,8 @@ load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 LUNE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catlog.luau")
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+API_DUMP = os.path.join(SCRIPT_DIR, "stuff", "API-Dump.json")
 LUNE_BIN = os.getenv("LUNE_BIN", "lune")
 TIMEOUT_SECONDS = 30
 
@@ -92,6 +94,7 @@ def run_lune(code: str) -> tuple[bool, str]:
             "--",
             input_path,
             f"out={output_path}",
+            f"api_dump={API_DUMP}",
         ]
 
         try:
