@@ -635,6 +635,7 @@ makeProxy = function(name: string): any
             return serviceCache[ks]
         end
         if mt._className == "Players" and ks == "LocalPlayer" then
+            if mt._localPlayer then return mt._localPlayer end
             if not children[ks] then
                 local player = makeProxy("LocalPlayer")
                 local pmt = getmetatable(player)
@@ -833,10 +834,13 @@ makeProxy = function(name: string): any
         end
 
         if not children[ks] then
-            local child = makeProxy(name .. "." .. ks)
-            local cmt = getmetatable(child)
-            cmt._parent = t
-            cmt._fieldName = ks
+            local child = parentChildMap[name] and parentChildMap[name][ks]
+            if not child then
+                child = makeProxy(name .. "." .. ks)
+                local cmt = getmetatable(child)
+                cmt._parent = t
+                cmt._fieldName = ks
+            end
             children[ks] = child
         end
         return children[ks]
@@ -1523,18 +1527,48 @@ makeProxy = function(name: string): any
         if isMethod and fieldName == "GetChildren" and parent then
             local parentName = proxyName(parent)
             emit(string.format('%s:GetChildren()', parentName))
-            return {}
+            local list = {}
+            if parentChildMap[parentName] then
+                local seen = {}
+                for _, child in pairs(parentChildMap[parentName]) do
+                    local cmt = getmetatable(child)
+                    local cn = cmt and cmt._storedValues and cmt._storedValues["Name"] or cmt._name
+                    if not seen[cn] then
+                        seen[cn] = true
+                        table.insert(list, child)
+                    end
+                end
+            end
+            return list
         end
 
-        if isMethod and fieldName == "GetDescendants" and parent then
+        if isMethod and (fieldName == "GetChildren" or fieldName == "GetDescendants") and parent then
             local parentName = proxyName(parent)
-            emit(string.format('%s:GetDescendants()', parentName))
-            return {}
+            emit(string.format('%s:%s()', parentName, fieldName))
+            local list = {}
+            local visited = {}
+            local function collect(pn)
+                if visited[pn] then return end
+                visited[pn] = true
+                if parentChildMap[pn] then
+                    for _, child in pairs(parentChildMap[pn]) do
+                        table.insert(list, child)
+                        if fieldName == "GetDescendants" then
+                            local cmt = getmetatable(child)
+                            if cmt then collect(cmt._name) end
+                        end
+                    end
+                end
+            end
+            collect(parentName)
+            return list
         end
 
         if isMethod and fieldName == "GetPlayers" and parent then
             local parentName = proxyName(parent)
             emit(string.format('%s:GetPlayers()', parentName))
+            local lp = serviceCache["Players"] and getmetatable(serviceCache["Players"])._localPlayer
+            if lp then return { lp } end
             return {}
         end
 
@@ -2020,9 +2054,14 @@ local function createEnv()
     env.workspace = spyInstance("Workspace", "workspace", true)
     env.Workspace = env.workspace
     workspaceProxy = env.workspace
+    serviceCache["Workspace"] = env.workspace
     local wsMt = getmetatable(env.workspace)
     wsMt._storedValues["Parent"] = env.game
     wsMt._setKeys["Parent"] = true
+    wsMt._storedValues["Gravity"] = 196.2
+    wsMt._setKeys["Gravity"] = true
+    wsMt._storedValues["FallSpeed"] = 196.2
+    wsMt._setKeys["FallSpeed"] = true
     local baseplate = makeProxy("Baseplate")
     local bpMt = getmetatable(baseplate)
     bpMt._className = "Part"
@@ -2044,14 +2083,131 @@ local function createEnv()
     parentChildMap["workspace"]["Terrain"] = terrain
     env.script = spyInstance("LocalScript", "script", true)
 
+    do
+        local function setupService(name)
+            if not serviceCache[name] then
+                local p = makeProxy(name)
+                local m = getmetatable(p)
+                m._className = name
+                m._storedValues["ClassName"] = name
+                m._setKeys["ClassName"] = true
+                serviceCache[name] = p
+            end
+            return serviceCache[name]
+        end
+        local playersSvc = setupService("Players")
+        local playersMt = getmetatable(playersSvc)
+        local function rname() local s="" for _=1,math.random(5,10) do s=s..string.char(math.random(97,122)) end return s end
+        local lp = makeProxy("_localPlayer")
+        local lpMt = getmetatable(lp)
+        lpMt._className = "Player"
+        lpMt._storedValues["ClassName"] = "Player"
+        lpMt._setKeys["ClassName"] = true
+        local pn = rname()
+        lpMt._name = pn
+        lpMt._storedValues["Name"] = pn
+        lpMt._setKeys["Name"] = true
+        lpMt._storedValues["DisplayName"] = rname()
+        lpMt._setKeys["DisplayName"] = true
+        lpMt._storedValues["UserId"] = math.random(100000, 999999999)
+        lpMt._setKeys["UserId"] = true
+        lpMt._storedValues["AccountAge"] = math.random(1, 5000)
+        lpMt._setKeys["AccountAge"] = true
+        lpMt._storedValues["Neutral"] = false
+        lpMt._setKeys["Neutral"] = true
+        playersMt._localPlayer = lp
+        local char = makeProxy(pn .. "_char")
+        local charMt = getmetatable(char)
+        charMt._className = "Model"
+        charMt._storedValues["ClassName"] = "Model"
+        charMt._setKeys["ClassName"] = true
+        charMt._storedValues["Name"] = pn
+        charMt._setKeys["Name"] = true
+        charMt._storedValues["Parent"] = env.workspace
+        charMt._setKeys["Parent"] = true
+        lpMt._storedValues["Character"] = char
+        lpMt._setKeys["Character"] = true
+        if not parentChildMap["workspace"] then parentChildMap["workspace"] = {} end
+        parentChildMap["workspace"][pn] = char
+        local hum = makeProxy(pn .. "_hum")
+        local humMt = getmetatable(hum)
+        humMt._className = "Humanoid"
+        humMt._storedValues["ClassName"] = "Humanoid"
+        humMt._setKeys["ClassName"] = true
+        humMt._storedValues["Name"] = "Humanoid"
+        humMt._setKeys["Name"] = true
+        humMt._storedValues["Parent"] = char
+        humMt._setKeys["Parent"] = true
+        if not parentChildMap[pn .. "_char"] then parentChildMap[pn .. "_char"] = {} end
+        parentChildMap[pn .. "_char"]["Humanoid"] = hum
+        local hrp = makeProxy(pn .. "_hrp")
+        local hrpMt = getmetatable(hrp)
+        hrpMt._className = "Part"
+        hrpMt._storedValues["ClassName"] = "Part"
+        hrpMt._setKeys["ClassName"] = true
+        hrpMt._storedValues["Name"] = "HumanoidRootPart"
+        hrpMt._setKeys["Name"] = true
+        hrpMt._storedValues["Parent"] = char
+        hrpMt._setKeys["Parent"] = true
+        parentChildMap[pn .. "_char"]["HumanoidRootPart"] = hrp
+        local rs = setupService("ReplicatedStorage")
+        local rschat = makeProxy("_rsChat")
+        local rschatMt = getmetatable(rschat)
+        rschatMt._className = "Folder"
+        rschatMt._storedValues["ClassName"] = "Folder"
+        rschatMt._setKeys["ClassName"] = true
+        rschatMt._storedValues["Name"] = "DefaultChatSystemChatEvents"
+        rschatMt._setKeys["Name"] = true
+        if not parentChildMap["ReplicatedStorage"] then parentChildMap["ReplicatedStorage"] = {} end
+        parentChildMap["ReplicatedStorage"]["DefaultChatSystemChatEvents"] = rschat
+        local blockReq = makeProxy("_blockReq")
+        local blockReqMt = getmetatable(blockReq)
+        blockReqMt._className = "RemoteEvent"
+        blockReqMt._storedValues["ClassName"] = "RemoteEvent"
+        blockReqMt._setKeys["ClassName"] = true
+        blockReqMt._storedValues["Name"] = "SetBlockedUserIdsRequest"
+        blockReqMt._setKeys["Name"] = true
+        if not parentChildMap["_rsChat"] then parentChildMap["_rsChat"] = {} end
+        parentChildMap["_rsChat"]["SetBlockedUserIdsRequest"] = blockReq
+        local plrScripts = makeProxy("_plrScripts")
+        local plrScriptsMt = getmetatable(plrScripts)
+        plrScriptsMt._className = "Folder"
+        plrScriptsMt._storedValues["ClassName"] = "Folder"
+        plrScriptsMt._setKeys["ClassName"] = true
+        plrScriptsMt._storedValues["Name"] = "PlayerScripts"
+        plrScriptsMt._setKeys["Name"] = true
+        lpMt._storedValues["PlayerScripts"] = plrScripts
+        lpMt._setKeys["PlayerScripts"] = true
+        local rbxCharSounds = makeProxy("_rbxCharSounds")
+        local rbxCharSoundsMt = getmetatable(rbxCharSounds)
+        rbxCharSoundsMt._className = "Folder"
+        rbxCharSoundsMt._storedValues["ClassName"] = "Folder"
+        rbxCharSoundsMt._setKeys["ClassName"] = true
+        rbxCharSoundsMt._storedValues["Name"] = "RbxCharacterSounds"
+        rbxCharSoundsMt._setKeys["Name"] = true
+        if not parentChildMap["_plrScripts"] then parentChildMap["_plrScripts"] = {} end
+        parentChildMap["_plrScripts"]["RbxCharacterSounds"] = rbxCharSounds
+        local atomicBinding = makeProxy("_atomicBinding")
+        local atomicBindingMt = getmetatable(atomicBinding)
+        atomicBindingMt._className = "Part"
+        atomicBindingMt._storedValues["ClassName"] = "Part"
+        atomicBindingMt._setKeys["ClassName"] = true
+        atomicBindingMt._storedValues["Name"] = "AtomicBinding"
+        atomicBindingMt._setKeys["Name"] = true
+        atomicBindingMt._storedValues["Archivable"] = true
+        atomicBindingMt._setKeys["Archivable"] = true
+        if not parentChildMap["_rbxCharSounds"] then parentChildMap["_rbxCharSounds"] = {} end
+        parentChildMap["_rbxCharSounds"]["AtomicBinding"] = atomicBinding
+    end
+
     env.Instance = setmetatable({
         new = function(c)
             local cls = tostring(c or "Instance")
             if not getApiClassInfo(cls) then
-                error("Instance.new: invalid class '" .. cls .. "'", 2)
+                error('Unable to create instance of type "' .. cls .. '"', 2)
             end
             if not isApiCreatableClass(cls) then
-                error("Instance.new: cannot create class '" .. cls .. "'", 2)
+                error('Unable to create instance of type "' .. cls .. '"', 2)
             end
             local v = genVar("inst")
             emit(string.format('local %s = Instance.new("%s")', v, cls))
@@ -2287,22 +2443,21 @@ local function createEnv()
         spawn = function(f, ...)
             tick()
             local args = table.pack(...)
-            local co = coroutine.create(function() runCallback(f, table.unpack(args, 1, args.n)) end)
-            coroutine.resume(co)
-            return co
+            local results = table.pack(pcall(f, table.unpack(args, 1, args.n)))
+            return function() return table.unpack(results, 1, results.n) end
         end,
         delay = function(t, f)
             tick()
-            local co = coroutine.create(function() runCallback(f) end)
-            return co
+            local results = table.pack(pcall(f))
+            return function() return table.unpack(results, 1, results.n) end
         end,
-        cancel = function(co) end,
+        cancel = function() end,
         clock = function() return os.clock() end,
         defer = function(f, ...)
             tick()
             local args = table.pack(...)
-            local co = coroutine.create(function() runCallback(f, table.unpack(args, 1, args.n)) end)
-            return co
+            local results = table.pack(pcall(f, table.unpack(args, 1, args.n)))
+            return function() return table.unpack(results, 1, results.n) end
         end,
         synchronize = function() end,
         desynchronize = function() end,
