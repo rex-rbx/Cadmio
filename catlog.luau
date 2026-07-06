@@ -39,7 +39,7 @@ local function getScriptDir(): string?
         if not ok or type(source) ~= "string" or source == "" then
             break
         end
-        if source ~= "[C]" and source ~= "[C]" then
+        if source ~= "[C]" then
             local path = source:match('^%[string "(.-)"%]$') or source:match("^@(.+)$") or source
             local dir = path:match("(.*[/\\])")
             if dir and dir ~= "" then
@@ -96,6 +96,11 @@ local STRING_LIKE_DATA_TYPES = {
     ContentId = true,
     ProtectedString = true,
     SharedString = true,
+}
+
+local SERVER_ONLY_SERVICES = {
+    ServerScriptService = true,
+    ServerStorage = true,
 }
 
 local function makeTagSet(items)
@@ -469,6 +474,8 @@ local function makeDescriptiveVar(methodName: string?, firstArg: any?): string
 end
 
 local makeProxy: (string) -> any
+local applyClassDefaults: (any, string) -> ()
+local spyInstance: (string, string?, boolean?) -> ()
 
 local function getPropertyRuntimeType(className: string?, memberName: string): string?
     local memberInfo = resolveApiMember(className or "", memberName)
@@ -541,6 +548,8 @@ local destroyedInstances: { [string]: boolean } = {}
 local memStorage: { [string]: any } = {}
 local parentChildMap: { [string]: { [string]: any } } = {}
 local workspaceProxy: any = nil
+local awakePartsCount = 0
+local unanchoredParts = setmetatable({}, { __mode = "k" })
 
 local function firePropertyChange(proxyNameStr: string, fieldName: string, value: any)
     local key = proxyNameStr .. "." .. fieldName
@@ -564,6 +573,1561 @@ local function fireAllConnectionsForEvent(proxyNameStr: string, eventName: strin
     end
 end
 
+local numericPseudoProps = {
+    AccelerationLean, AccelerationTime, AirDensity, AirTurbulenceIntensity, Angle,
+    AngleSnapIncrement, AngularDamping, AngularResponsiveness, AngularRestitution,
+    AngularSpeed, AngularStrength, AngularVelocity, AnimationIdForRestPose, AspectRatio,
+    AssetId, Attack, AutoFRMLevel, BackgroundTransparency, BalanceMaxTorque, BalanceSpeed,
+    BaseAngle, BaseMoveSpeed, BaseTextureId, BaseTurnSpeed, BlastPressure, BlastRadius,
+    BodyTypeScale, BorderSizePixel, Brightness, BubbleDuration, BubblesSpacing,
+    BuildDebouncePeriod, CameraMaxZoomDistance, CameraMinZoomDistance, CameraMouseMultiplier,
+    CameraOrbitSensitivity, CameraPanSensitivity, CameraShiftFactor, CameraZoomSpeed,
+    CartoonFactor, Channel, CharacterAppearanceId, CharacterJumpHeight, CharacterJumpPower,
+    CharacterMaxSlopeAngle, CharacterWalkSpeed, ChestSize, ChinRaiser, ChinRaiserUpperLip,
+    ClimbAnimation, ClockTime, Coils, CommandBarHistoryLen, ComparisonDiffThreshold,
+    ComparisonPsnrThreshold, Contrast, ConversationDistance, Corrugator, Cover, CurrentAngle,
+    CursorPosition, CurveSize0, CurveSize1, CustomBackAccessoryId, CustomBodyBundleId,
+    CustomClassicPantsAccessoryId, CustomClassicShirtsAccessoryId,
+    CustomClassicTShirtsAccessoryId, CustomClimbAnimationId, CustomDressSkirtAccessoryId,
+    CustomEyebrowId, CustomEyelashId, CustomFaceAccessoryId, CustomFaceId,
+    CustomFallAnimationId, CustomFrontAccessoryId, CustomHairAccessoryId,
+    CustomHeadAccessoryId, CustomHeadId, CustomIdleAlt1AnimationId, CustomIdleAlt2AnimationId,
+    CustomIdleAnimationId, CustomJacketAccessoryId, CustomJumpAnimationId, CustomLeftArmId,
+    CustomLeftLegId, CustomLeftShoesAccessoryId, CustomMoodId, CustomNeckAccessoryId,
+    CustomPantsAccessoryId, CustomRightArmId, CustomRightLegId, CustomRightShoesAccessoryId,
+    CustomRunAnimationId, CustomShirtAccessoryId, CustomShortsAccessoryId,
+    CustomShoulderAccessoryId, CustomSweaterAccessoryId, CustomSwimAnimationId,
+    CustomSwimIdleAnimationId, CustomTShirtAccessoryId, CustomTorsoId, CustomWaistAccessoryId,
+    CustomWalkAnimationId, CycleOffset, D, Damping, DataComplexityLimit, DecayRatio,
+    DecayTime, DecelerationTime, Delay, DelayTime, Density, Depth, DepthScale, DesiredAngle,
+    DestroyJointRadiusPercent, DiagonalFieldOfView, Diffusion, DisplayOrder, DistanceFactor,
+    DistanceLowerLimit, DistanceStep, DistanceUpperLimit, DistributedGameTime, DopplerScale,
+    Drag, DragRotation, DraggerLengthFactor, DraggerMajorGridIncrement, DraggerMaxSoftSnaps,
+    DraggerScaleFactor, DraggerSoftSnapMarginFactor, DraggerSummonMarginFactor,
+    DraggerTiltRotateDuration, DryLevel, Duration, Duty, EarlyDelayTime, EmissiveStrength,
+    EmitterSize, EnvironmentDiffuseScale, EnvironmentSpecularScale, ExplorerImageIndex,
+    ExplorerOrder, ExposureCompensation, EyesLookDown, EyesLookLeft, EyesLookRight,
+    EyesLookUp, Face, FallAnimation, FallenPartsDestroyHeight, FarIntensity, Feedback,
+    FieldOfView, FillDirectionMaxCells, FillTransparency, FlatPucker, FlipbookSizeX,
+    FlipbookSizeY, FluidForceDrawScale, FocusDistance, FogEnd, FogStart, Force,
+    ForceDrawScale, ForceVisualizationSmoothingSteps, FrameId, FreeLength, Frequency,
+    Friction, FrictionWeight, Funneler, Gain, GainMakeup, GamepadCameraSensitivity,
+    GeographicLatitude, Glare, GraphicTShirt, GraphicsQualityLevel, Gravity, GroundOffset,
+    GroupTransparency, GrowRatio, Haze, Head, HeadBaseSize, HeadScale, Health,
+    HealthDisplayDistance, Heat, Height, HeightScale, HighCutFrequency, HighGain, HipHeight,
+    HipHeightScales, HoldDuration, HoverAnimateFrequency, HoverThickness, IdleAnimation,
+    ImageTransparency, InFocusRadius, InboundNetworkJitterMs, InboundNetworkLossPercent,
+    InboundNetworkMinDelayMs, InclinationAngle, IncomingReplicationLag, IndexSize,
+    InnerRadius, InputLatency, Intensity, InviteUser, JawDrop, JawLeft, JawRight,
+    JumpAnimation, JumpHeight, JumpPower, LODLevel, LadderSearchHeight, LadderSearchOffset,
+    LargeFileLineCountThreshold, LargeFileThreshold, LateDelayTime, LayoutOrder,
+    LeftAnkleSize, LeftArm, LeftBrowLowerer, LeftCheekPuff, LeftCheekRaiser, LeftClavicleSize,
+    LeftDimpler, LeftElbowSize, LeftEyeClosed, LeftEyeUpperLidRaiser, LeftHipSize,
+    LeftInnerBrowRaiser, LeftKneeSize, LeftLeg, LeftLipCornerDown, LeftLipCornerPuller,
+    LeftLipStretcher, LeftLowerLipDepressor, LeftNoseWrinkler, LeftOuterBrowRaiser,
+    LeftShoulderSize, LeftToeBaseSize, LeftUpperLipRaiser, LeftWristSize, Length, Level,
+    Lifetime, LightEmission, LightInfluence, LimitAngle0, LimitAngle1, LineHeight,
+    LineThickness, LineVelocity, LinearDamping, LinearResponsiveness, LinearSnapIncrement,
+    LinearStrength, LipPresser, LipsTogether, LowGain, LowShelfFrequency, LowShelfGain,
+    LowerAngle, LowerLimit, LowerLipSuck, Magnitude, MakeupGain, MasterVolume,
+    MasterVolumeStudio, MaxAcceleration, MaxActivationDistance, MaxAngle, MaxAngularVelocity,
+    MaxAxisDistance, MaxAxisFieldOfView, MaxBlurSize, MaxBubbles, MaxDistance, MaxDragAngle,
+    MaxDuration, MaxFindReplaceAllResults, MaxForce, MaxFrictionTorque, MaxHealth,
+    MaxIndicatorDistance, MaxIndicatorsVisible, MaxItems, MaxLength, MaxLevel, MaxPlayers,
+    MaxPromptsVisible, MaxRollAngleLeft, MaxRollAngleRight, MaxSlopeAngle, MaxSpeed,
+    MaxTextSize, MaxThrust, MaxTorque, MaxValue, MaxVelocity, MaxVisibleGraphemes,
+    MaximumSimulationRadius, MeshCacheSize, MeshId, MidGain, MiddleSize, MinDistance,
+    MinDragAngle, MinDuration, MinLength, MinTextSize, MinValue, MinimizeDistance, Mix,
+    MoodAnimation, MoonAngularSize, MotorMaxAcceleration, MotorMaxAngularAcceleration,
+    MotorMaxForce, MotorMaxTorque, MouseDeltaSensitivity, MouseSensitivity, MouthLeft,
+    MouthRight, MoveMaxForce, MoveSpeedFactor, NameDisplayDistance, NearIntensity, NearPlaneZ,
+    NeckSize, NumPlayers, NumberOfPlayers, Octave, Offset, OffsetStudsU, OffsetStudsV,
+    Opacity, Order, OutboundNetworkJitterMs, OutboundNetworkLossPercent,
+    OutboundNetworkMinDelayMs, OutlineTransparency, OverlayTextureId, P, Padding,
+    PaddingBottom, PaddingLeft, PaddingRight, PaddingTop, Pants, PartyVoiceVolume, PinkySize,
+    Pitch, PitchMaxTorque, PitchSpeedFactor, PixelsPerStud, PlaybackSpeed, PointerIndex, Port,
+    PreferredUploadId, PressedThreshold, PriorFrameInvoked, Priority, PromptHoldDuration,
+    PropertyOrder, ProportionScale, Pucker, Q, QualityLevel, RCCProfilerRecordFrameRate,
+    RCCProfilerRecordTimeFrame, Radius, RampTime, Range, Rate, Ratio, ReferenceFrequency,
+    Reflectance, Release, ReleasedThreshold, RenderingTestFrameCount, RespawnTime,
+    ResponseCurve, Responsiveness, Restitution, RightAnkleSize, RightArm, RightBrowLowerer,
+    RightCheekPuff, RightCheekRaiser, RightClavicleSize, RightDimpler, RightElbowSize,
+    RightEyeClosed, RightEyeUpperLidRaiser, RightHipSize, RightInnerBrowRaiser, RightKneeSize,
+    RightLeg, RightLipCornerDown, RightLipCornerPuller, RightLipStretcher,
+    RightLowerLipDepressor, RightNoseWrinkler, RightOuterBrowRaiser, RightShoulderSize,
+    RightToeBaseSize, RightUpperLipRaiser, RightWristSize, RingSize, RiseVelocity,
+    RollMaxTorque, RollOffMaxDistance, RollOffMinDistance, RollSpeedFactor, RolloffScale,
+    RootPriority, RootSize, Rotation, RunAnimation, Saturation, Scale, ScaleFactor,
+    ScriptTimeoutLength, ScrollBarImageTransparency, ScrollBarThickness, SearchDistance, Seed,
+    Segments, SelectedControlPoint, SelectionModeRotateSpeed, SelectionOrder, SelectionStart,
+    ServoMaxForce, ServoMaxTorque, ShadowSoftness, Shape, ShapePartial, Shirt, ShrinkRatio,
+    Sides, SimulateSecondsLag, SimulationRadius, Size, Skew, SliceScale, SmoothTime,
+    SmoothingAngle, Speed, SpineSize, Spread, SpringDamping, SpringStiffness, Square,
+    StandForce, StandSpeed, StarCount, Steer, SteerFloat, StepIdOffset, Stiffness,
+    StudsBetweenTextures, StudsPerTile, StudsPerTileU, StudsPerTileV, SunAngularSize,
+    SurfaceTransparency, SwimAnimation, TargetAngle, TargetPosition, TargetRadius,
+    Temperature, TextSize, TextStrokeTransparency, TextTransparency, TextureLength,
+    TextureSpeed, Thickness, Threshold, Throttle, ThrottleAdjustTime, ThrottleFloat, ThrustD,
+    ThrustP, ThrustSpeed, ThumbSize, Time, TimePosition, TimeScale, Timeout, TongueDown,
+    TongueOut, TongueUp, ToolPunchThroughDistance, TopP, Torque, TorqueDrawScale, Torso,
+    TrackballRadialPullFactor, TrackballRollFactor, Transparency, TriangleCount,
+    TriggerDistance, TurnD, TurnMaxTorque, TurnP, TurnSpeed, TurnSpeedFactor, TweenTime,
+    TwistLowerAngle, TwistUpperAngle, UIMaximum, UIMinimum, UINumTicks, UpperAngle,
+    UpperLimit, UpperLipSuck, UserId, VRRotationIntensity, Value, Velocity,
+    VelocityInheritance, VersionNumber, VersionedAssetId, VerticalStudsOffset,
+    VideoTransparency, VoiceChatVolume, Volume, WaistSize, WalkAnimation, WalkSpeed,
+    WalkSpeedScales, WaterReflectance, WaterTransparency, WaterWaveSize, WaterWaveSpeed,
+    Weight, WetLevel, Width, Width0, Width1, WidthScale, WinchForce, WinchResponsiveness,
+    WinchSpeed, WinchTarget, WireRadius, ZIndex, ZOffset,
+}
+
+local positiveNumberProps = {
+    AccelerationTime, AirDensity, AirTurbulenceIntensity, Angle, AngleSnapIncrement,
+    AngularDamping, AngularResponsiveness, AngularRestitution, AngularSpeed, AspectRatio,
+    BalanceMaxTorque, BalanceSpeed, BaseAngle, BaseMoveSpeed, BaseTurnSpeed, BlastPressure,
+    BlastRadius, BodyTypeScale, BorderSizePixel, Brightness, CameraMaxZoomDistance,
+    CameraMinZoomDistance, CameraZoomSpeed, CharacterJumpHeight, CharacterJumpPower,
+    CharacterMaxSlopeAngle, CharacterWalkSpeed, ChestSize, ClockTime, ComparisonDiffThreshold,
+    ComparisonPsnrThreshold, ConversationDistance, CurrentAngle, CursorPosition, CurveSize0,
+    CurveSize1, CycleOffset, Damping, DataComplexityLimit, DecayRatio, DecayTime,
+    DecelerationTime, DelayTime, Density, Depth, DepthScale, DesiredAngle,
+    DestroyJointRadiusPercent, DiagonalFieldOfView, DistanceFactor, DistanceLowerLimit,
+    DistanceStep, DistanceUpperLimit, DistributedGameTime, DopplerScale, DraggerLengthFactor,
+    DraggerScaleFactor, EarlyDelayTime, EmitterSize, EnvironmentDiffuseScale,
+    EnvironmentSpecularScale, FallenPartsDestroyHeight, FarIntensity, FieldOfView,
+    FlipbookSizeX, FlipbookSizeY, FluidForceDrawScale, FocusDistance, FogEnd, FogStart, Force,
+    ForceDrawScale, ForceVisualizationSmoothingSteps, FreeLength, Frequency, Friction,
+    FrictionWeight, Glare, Gravity, GroundOffset, Haze, HeadBaseSize, HeadScale, Health,
+    HealthDisplayDistance, Height, HeightScale, HighCutFrequency, HipHeight, HipHeightScales,
+    HoverAnimateFrequency, HoverThickness, InFocusRadius, InclinationAngle, IndexSize,
+    InnerRadius, Intensity, JumpHeight, JumpPower, LadderSearchHeight, LadderSearchOffset,
+    LargeFileLineCountThreshold, LargeFileThreshold, LateDelayTime, LayoutOrder,
+    LeftAnkleSize, LeftClavicleSize, LeftElbowSize, LeftHipSize, LeftKneeSize,
+    LeftShoulderSize, LeftToeBaseSize, LeftWristSize, Length, Lifetime, LightEmission,
+    LightInfluence, LimitAngle0, LimitAngle1, LineHeight, LineThickness, LinearDamping,
+    LinearResponsiveness, LowShelfFrequency, LowerAngle, MasterVolume, MasterVolumeStudio,
+    MaxAcceleration, MaxActivationDistance, MaxAngle, MaxAxisDistance, MaxBlurSize,
+    MaxDistance, MaxDragAngle, MaxForce, MaxFrictionTorque, MaxHealth, MaxIndicatorDistance,
+    MaxIndicatorsVisible, MaxItems, MaxLength, MaxPlayers, MaxPromptsVisible,
+    MaxRollAngleLeft, MaxRollAngleRight, MaxSlopeAngle, MaxSpeed, MaxTextSize, MaxThrust,
+    MaxTorque, MaxVisibleGraphemes, MaximumSimulationRadius, MeshCacheSize, MiddleSize,
+    MinDistance, MinDragAngle, MinLength, MinTextSize, MinimizeDistance, MoonAngularSize,
+    MotorMaxForce, MotorMaxTorque, MoveMaxForce, MoveSpeedFactor, NameDisplayDistance,
+    NearIntensity, NearPlaneZ, NeckSize, NumPlayers, Offset, OffsetStudsU, OffsetStudsV,
+    Padding, PaddingBottom, PaddingLeft, PaddingRight, PaddingTop, PartyVoiceVolume,
+    PinkySize, PitchMaxTorque, PitchSpeedFactor, PixelsPerStud, PlaybackSpeed,
+    PressedThreshold, PromptHoldDuration, ProportionScale, RCCProfilerRecordFrameRate,
+    RCCProfilerRecordTimeFrame, Radius, RampTime, Range, Rate, ReferenceFrequency,
+    ReleasedThreshold, RenderingTestFrameCount, RespawnTime, Responsiveness, Restitution,
+    RightAnkleSize, RightClavicleSize, RightElbowSize, RightHipSize, RightKneeSize,
+    RightShoulderSize, RightToeBaseSize, RightWristSize, RingSize, RollMaxTorque,
+    RollOffMaxDistance, RollOffMinDistance, RollSpeedFactor, RolloffScale, RootSize, Scale,
+    ScaleFactor, ScriptTimeoutLength, ScrollBarThickness, SearchDistance,
+    SelectionModeRotateSpeed, ServoMaxForce, ServoMaxTorque, SimulationRadius, Size,
+    SliceScale, SmoothTime, SmoothingAngle, Speed, SpineSize, Spread, SpringDamping,
+    SpringStiffness, StandForce, StandSpeed, StarCount, StepIdOffset, Stiffness,
+    StudsPerTileU, StudsPerTileV, SunAngularSize, TargetAngle, TargetPosition, TargetRadius,
+    TextSize, TextureLength, TextureSpeed, Thickness, Threshold, ThrottleAdjustTime,
+    ThrustSpeed, ThumbSize, Time, TimePosition, TimeScale, Timeout, ToolPunchThroughDistance,
+    Torque, TorqueDrawScale, TriangleCount, TriggerDistance, TurnMaxTorque, TurnSpeed,
+    TurnSpeedFactor, TweenTime, TwistLowerAngle, TwistUpperAngle, UpperAngle,
+    VRRotationIntensity, VerticalStudsOffset, VoiceChatVolume, Volume, WaistSize, WalkSpeed,
+    WalkSpeedScales, WaterWaveSize, WaterWaveSpeed, Width, Width0, Width1, WidthScale,
+    WinchForce, WinchResponsiveness, WinchSpeed, WireRadius, ZIndex, ZOffset,
+}
+
+local booleanPseudoProps = {
+    AcousticSimulationEnabled, Active, AddModelToInventory, AddPathsToBundle,
+    AlignDraggedObjects, AllScopes, AllTutorialsDisabled, AllowInsertFreeAssets, AllowSleep,
+    AllowTeamChangeOnTouch, AllowThirdPartySales, AlwaysOnTop, Anchored, AngleSnapEnabled,
+    AngularLimitsEnabled, AnimateHover, Animated, ApplyAtCenterOfMass, Archivable,
+    AreAnchorsShown, AreAssembliesShown, AreAssemblyCentersOfMassShown,
+    AreAwakePartsHighlighted, AreBodyTypesShown, AreCollisionCostsShown,
+    AreConstraintForcesShownForSelectedOrHoveredInstances,
+    AreConstraintTorquesShownForSelectedOrHoveredInstances,
+    AreContactForcesShownForSelectedOrHoveredAssemblies, AreContactIslandsShown,
+    AreContactPointsShown, AreGravityForcesShownForSelectedOrHoveredAssemblies,
+    AreJointCoordinatesShown, AreMagnitudesShownForDrawnForcesAndTorques, AreMechanismsShown,
+    AreModelCoordsShown, AreNonAnchorsShown, AreOwnersShown, ArePartCoordsShown,
+    AreRegionsShown, AreSolverIslandsShown, AreTerrainReplicationRegionsShown,
+    AreTimestepsShown, AreUnalignedPartsShown, AreWorldCoordsShown, AudioCanCollide,
+    AutoAssignable, AutoButtonColor, AutoHideParent, AutoJumpEnabled, AutoLoad, AutoLocalize,
+    AutoPlay, AutoResumeSyncOnPlaceOpen, AutoRotate, AutoRuns, AutoSelectGuiEnabled,
+    AutoUpdate, AutoUpdateEnabled, AutocompleteEnabled, AutocompleteVisible, AutomaticRetry,
+    AutomaticScalingEnabled, AvatarGestures, BadgeVisible, BalanceRigidityEnabled,
+    BreakJointsOnDeath, Browsable, BubbleChatEnabled, Bypass, CageMeshIntersectedPreview,
+    CageNonManifoldPreview, CageOverlappingVerticesPreview, CageUVMisMatchedPreview,
+    CameraAdaptiveSpeed, CameraAltLeftMouseToRotate, CameraTweenFocus,
+    CameraZoomToMousePosition, CanBeDropped, CanCollide, CanLoadCharacterAppearance, CanQuery,
+    CanSend, CanTouch, CastShadow, CelestialBodiesShown, CharacterAutoLoads,
+    CharacterBreakJointsOnDeath, CharacterUseJumpPower, ChatTranslationEnabled, ChatVisible,
+    Circular, ClampMagnitudeToOne, ClassicDeath, ClearTextOnFocus, ClickablePrompt,
+    ClickableWhenViewportHidden, ClientOnly, ClipToDeviceSafeArea, ClipsDescendants,
+    CloseWhenScreenshotTaken, Closed, CollisionsEnabled, CommandBarEnterExec,
+    CommandBarLocalState, ContinueExecution, CoverageInfo, CreateDefaultCommands,
+    CreateDefaultTextChannels, CustomBackAccessoryEnabled, CustomClassicPantsAccessoryEnabled,
+    CustomClassicShirtsAccessoryEnabled, CustomClassicTShirtsAccessoryEnabled,
+    CustomClimbAnimationEnabled, CustomDressSkirtAccessoryEnabled, CustomEyebrowEnabled,
+    CustomEyelashEnabled, CustomFaceAccessoryEnabled, CustomFaceEnabled,
+    CustomFallAnimationEnabled, CustomFrontAccessoryEnabled, CustomHairAccessoryEnabled,
+    CustomHeadAccessoryEnabled, CustomHeadEnabled, CustomIdleAlt1AnimationEnabled,
+    CustomIdleAlt2AnimationEnabled, CustomIdleAnimationEnabled, CustomJacketAccessoryEnabled,
+    CustomJumpAnimationEnabled, CustomLeftArmEnabled, CustomLeftLegEnabled,
+    CustomLeftShoesAccessoryEnabled, CustomMoodEnabled, CustomNeckAccessoryEnabled,
+    CustomPantsAccessoryEnabled, CustomRightArmEnabled, CustomRightLegEnabled,
+    CustomRightShoesAccessoryEnabled, CustomRunAnimationEnabled, CustomShirtAccessoryEnabled,
+    CustomShortsAccessoryEnabled, CustomShoulderAccessoryEnabled,
+    CustomSweaterAccessoryEnabled, CustomSwimAnimationEnabled, CustomSwimIdleAnimationEnabled,
+    CustomTShirtAccessoryEnabled, CustomTorsoEnabled, CustomWaistAccessoryEnabled,
+    CustomWalkAnimationEnabled, DebugInfo, Deprecated, DeprecatedObjectsShown,
+    DevEnableMouseLock, DiffractionEnabled, DisableCSGv2, DisableCSGv3ForPlugins,
+    DisableUIDragDetectorDrags, Disabled, DoubleSided, DraggerShowAxisTicks,
+    DraggerShowHoverRuler, DraggerShowMeasurement, DraggerShowNegativeAxes, DraggerShowPlanes,
+    DraggerShowTargetSnap, DraggerShowTrackball, DraggerShowWhileDragging,
+    DrawConstraintsNetForce, DrawContactsNetForce, DrawTotalNetForce, EagerBulkExecution,
+    EditModeActive, EditingDisabled, Editor, EnableClimbing, EnableCodeAssist,
+    EnableCrouching, EnableDefaultVoice, EnableEmissives, EnableFallingDown, EnableFindOnType,
+    EnableFluidForces, EnableForceVisualizationSmoothing, EnableGettingUp, EnableHolding,
+    EnableIndentationRulers, EnableJumping, EnableMouseLockOption, EnableReaching,
+    EnableRunning, EnableSelectionTooltips, EnableSitting, EnableSkinning, EnableSound,
+    EnableSprinting, EnableStrafing, EnableStudioStreaming, EnableSwimming, EnableVFX,
+    EnableVideoAds, Enabled, EvaluateStateMachine, ExecuteWithStudioRun,
+    ExportMergeByMaterial, FaceCamera, FadeOutViewOnCollision, FallHeightEnabled,
+    FillEmptySpaceColumns, FillEmptySpaceRows, FlattenTree, FlipbookBlendFrames,
+    FlipbookStartRandom, ForceLimitsEnabled, ForwardInput, Fullscreen, FullySubmerged,
+    GamepadCursorEnabled, GamepadInputEnabled, GlobalShadows, GoodbyeChoiceActive,
+    GuiNavigationEnabled, HasEverUsedVR, HasRobloxSubscription, HasVerifiedBadge, HeadLocked,
+    HeadsUpDisplay, HideCoreGuiForCaptures, HidePlayerGuiForCaptures, HighCompression, Hollow,
+    HttpEnabled, HttpProxyEnabled, IgnoreGuiInset, IgnoreVertexColors, ImportAsModelAsset,
+    ImportAsPackage, InUse, InsertInWorkspace, InsertWithScenePosition, Insertable,
+    Interactable, InverseSquareLaw, InvertNegativeFaces, IrrelevantCageModifiedPreview,
+    IsArrowVisible, IsBackend, IsBidirectional, IsCaptureModeForReport, IsDebuggable,
+    IsEnabled, IsInterpolationThrottleShown, IsKinematic, IsLayered,
+    IsPhysicsEnvironmentalThrottled, IsPlaying, IsReceiveAgeShown, IsRecording,
+    IsScriptStackTracingEnabled, IsSleepAllowed, IsTreeShown, JointsEnabled, Jump,
+    KeepPlayerHead, KeepZeroInfluenceBones, LimitsEnabled, LinearSnapEnabled,
+    LoadAllBuiltinPluginsInRunModes, LoadCharacterAppearance, LoadDefaultChat,
+    LoadInternalPlugins, LoadUserPluginsInRunModes, Loaded, LockCameraSpeed, Locked,
+    LockedToPart, LoggingEnabled, Loop, Looped, Looping, LuaDebuggerEnabled,
+    MaintainAngularMomentum, MaintainLinearMomentum, ManualActivationOnly, Massless,
+    MaxQualityEnabled, MergeMeshes, MeshHoleDetectedPreview, Modal, MouseIconEnabled,
+    MultiLine, Muted, Neutral, OcclusionEnabled, Open, OuterCageFarExtendedFromMeshPreview,
+    PackAsSource, PartSnapEnabled, PassThrough, PerfTest, PivotSnapToGeometry, PlatformStand,
+    PlayOnRemove, PlaybackRegionsEnabled, PlayerListVisible, PlayerNamesEnabled, Playing,
+    PluginDebuggingEnabled, PreferLodEnabled, PrimaryAxisOnly, PrintJoinSizeBreakdown,
+    PrintPhysicsErrors, PrintStreamInstanceQuota, PrioritizeLightingQuality, PublishLocked,
+    QualityAuto, RandomizeJoinInstanceOrder, ReactionForceEnabled, ReactionTorqueEnabled,
+    ReloadAssets, ReloadBuiltinPluginsOnChange, ReloadLocalPluginsOnChange,
+    RenderCSGTrianglesDebug, RenderStreamedRegions, ReportSoundWarnings, RequiresHandle,
+    RequiresLineOfSight, RequiresNeck, ResetOnSpawn, RespectFilteringEnabled, ReverbEnabled,
+    RichText, RigVisualization, RigidityEnabled, RotationAxisVisible, RunLocally, Sandboxed,
+    ScrollWheelInputEnabled, ScrollingEnabled, Selectable, Selected, SelectionGroup,
+    SerializePatch, ServerOnly, Shadows, ShouldImport, ShouldReserveServer, ShouldSkip,
+    ShowActiveAnimationAsset, ShowBoundingBoxes, ShowCorePackagesInExplorer,
+    ShowDecompositionGeometry, ShowDevelopmentGui,
+    ShowFluidForcesForSelectedOrHoveredMechanisms, ShowHover,
+    ShowInstanceNamesForDrawnForcesAndTorques, ShowNativeInput, ShowPivotIndicator, Sink, Sit,
+    SpectrumEnabled, StartServer, StaticFacialAnimation, StickyWheels, StreamingEnabled,
+    TailVisible, TextEditable, TextScaled, TextWrapped, ThrottlePhysicsToRealtime,
+    TouchControlsEnabled, TouchInputEnabled, TouchingSurface, TwistLimitsEnabled,
+    Use2022Materials, UseAvatarSettings, UseCSGv2, UseCache, UseDefaultExternalEditor,
+    UseFileLevelCompressionInsteadOfChunk, UseImportedPivot, UseJumpPower, UseLocalSpace,
+    UsePartColor, UseSceneOriginAsPivot, UsedCoreGuiIsVisibleToggle,
+    UsedCustomGuiIsVisibleToggle, UsedHideHudShortcut, UserEmotesEnabled, UsesCages,
+    VREnabled, VRSmoothRotationEnabled, VRTiltAndRollEnabled, ValidateUgcBody, Value,
+    VignetteEnabled, Visible, WinchEnabled, WindAffectsDrag, Wraps, ZstdCompression,
+    isContextDependentBreakpoint,
+}
+
+local stringPseudoProps = {
+    ActionText, AdorneeName, Album, Artist, AudioInteractionGroup, BackAccessory, CameraId,
+    ClassCategory, CollisionGroup, Condition, Constraint, ContentId, ContextLabel,
+    DefaultName, Description, DiffuseFilePath, DisplayLanguage, DisplayName, EditorType,
+    EmissiveFilePath, ExistingPackageId, Expression, FFlag, FaceAccessory,
+    FlipbookIncompatible, FrontAccessory, GoodbyeDialog, HairAccessory, HatAccessory,
+    HeadShape, HttpProxyURL, Icon, ImportName, InitialPrompt, Interface, InviteMessageId,
+    Label, LaunchData, LogExpression, Manifest, MaterialVariant, MessageId, Metadata,
+    MetalnessFilePath, Name, NeckAccessory, NodeId, NormalFilePath, ObjectText,
+    OnboardingsCompleted, OpenTypeFeatures, OutputPath, PatchId, PlaceholderText,
+    PreferredParent, PrefixText, PrimaryAlias, PromptMessage, ReservedServerAccessCode,
+    ResponseDialog, RoughnessFilePath, Rulers, ScriptContext, SearchKeyword, SecondaryAlias,
+    Secrets, SelectedTheme, Selector, ServerInstanceId, ShouldersAccessory, SliderScaling,
+    SourceLocaleId, SourceName, SystemPrompt, Tag, TargetName, TargetPath, Text, Ticket,
+    TimeOfDay, Title, ToolTip, Translation, UserDialog, Value, VoiceId, WaistAccessory,
+}
+
+local color3PseudoProps = {
+    Ambient, BackgroundColor3, BorderColor3, Color, Color3, ColorShift_Bottom, ColorShift_Top,
+    Decay, DraggerActiveColor, DraggerPassiveColor, EmissiveTint, FillColor, FogColor,
+    GeometrySnapColor, GroupColor3, HeadColor, HeadColor3, HintColor, HoverBackgroundColor3,
+    ImageColor3, IndentationRulerColor, InformationColor, LeftArmColor, LeftArmColor3,
+    LeftLegColor, LeftLegColor3, LightColor, OutdoorAmbient, OutlineColor, PlaceholderColor3,
+    RightArmColor, RightArmColor3, RightLegColor, RightLegColor3, ScrollBarImageColor3,
+    SecondaryColor, SelectedTabTextColor3, SparkleColor, SurfaceColor3, TextColor3,
+    TextStrokeColor3, TintColor, TorsoColor, TorsoColor3, TypeColor, VAxisColor, Value,
+    VideoColor3, WaterColor, XAxisColor, YAxisColor, ZAxisColor,
+}
+
+local vector3PseudoProps = {
+    Acceleration, AngularVelocity, AssemblyAngularVelocity, AssemblyLinearVelocity, Axis,
+    CameraOffset, ChestRangeMax, ChestRangeMin, Delta, ExtentsOffset, ExtentsOffsetWorldSpace,
+    F0, F1, F2, F3, FacingDirection, Force, GlobalWind, HeadBaseRangeMax, HeadBaseRangeMin,
+    HitNormal, IndexRange, InsertPoint, LeftAnkleRangeMax, LeftAnkleRangeMin,
+    LeftClavicleRangeMax, LeftClavicleRangeMin, LeftElbowRangeMax, LeftElbowRangeMin,
+    LeftHipRangeMax, LeftHipRangeMin, LeftKneeRangeMax, LeftKneeRangeMin,
+    LeftShoulderRangeMax, LeftShoulderRangeMin, LeftToeBaseRangeMax, LeftToeBaseRangeMin,
+    LeftWristRangeMax, LeftWristRangeMin, LightDirection, LimitBounds, LineDirection,
+    LocalPlayerStudsOffset, Location, LookAtPosition, MaxAxesForce, MaxDragTranslation,
+    MaxForce, MaxTorque, MiddleRange, MinDragTranslation, MovingDirection, NeckRangeMax,
+    NeckRangeMin, Offset, Orientation, PinkyRange, Point, Position, PrimaryAxis,
+    PrimaryTangentAxis, RightAnkleRangeMax, RightAnkleRangeMin, RightClavicleRangeMax,
+    RightClavicleRangeMin, RightElbowRangeMax, RightElbowRangeMin, RightHipRangeMax,
+    RightHipRangeMin, RightKneeRangeMax, RightKneeRangeMin, RightShoulderRangeMax,
+    RightShoulderRangeMin, RightToeBaseRangeMax, RightToeBaseRangeMin, RightWristRangeMax,
+    RightWristRangeMin, RingRange, RootRangeMax, RootRangeMin, Rotation, Scale, SecondaryAxis,
+    SecondaryTangentAxis, SingleColliderSize, Size, SizeRelativeOffset, SkyboxOrientation,
+    SpineRangeMax, SpineRangeMin, StudsOffset, StudsOffsetWorldSpace, TargetOffset,
+    TargetPoint, ThumbRange, Torque, TriggerOffset, UpDirection, Value, Vector3Scale,
+    VectorVelocity, Velocity, VertexColor, WaistRangeMax, WaistRangeMin, WalkToPoint,
+    WorldAxis, WorldSecondaryAxis,
+}
+
+local udim2PseudoProps = {
+    CameraButtonPosition, CanvasSize, CellPadding, CellSize, CloseButtonPosition, DragUDim2,
+    MaxDragTranslation, MinDragTranslation, Offset, Padding, Position, SelectionModeDragSpeed,
+    Size, Spread, TileSize,
+}
+local classDefaultProperties: { [string]: { [string]: any } } = {
+    AccessoryDescription = {
+        AssetId = 0, IsLayered = false, Order = 0, Position = "Vector3", Rotation = "Vector3", Scale = "Vector3",
+    },
+    Accoutrement = {
+        AttachmentPoint = "CFrame",
+    },
+    Actor = {},
+    AdGui = {
+        EnableVideoAds = false,
+    },
+    AdService = {},
+    AirController = {
+        BalanceMaxTorque = 0, BalanceSpeed = 0, MaintainAngularMomentum = false, MaintainLinearMomentum = false,
+        MoveMaxForce = 0, TurnMaxTorque = 0, TurnSpeedFactor = 0,
+    },
+    AlignOrientation = {
+        CFrame = "CFrame", LookAtPosition = "Vector3", MaxAngularVelocity = 0, MaxTorque = 0, PrimaryAxis = "Vector3",
+        PrimaryAxisOnly = false, ReactionTorqueEnabled = false, Responsiveness = 0, RigidityEnabled = false,
+        SecondaryAxis = "Vector3",
+    },
+    AlignPosition = {
+        ApplyAtCenterOfMass = false, MaxAxesForce = "Vector3", MaxForce = 0, MaxVelocity = 0, Position = "Vector3",
+        ReactionForceEnabled = false, Responsiveness = 0, RigidityEnabled = false,
+    },
+    AngularVelocity = {
+        AngularVelocity = "Vector3", MaxTorque = 0, ReactionTorqueEnabled = false,
+    },
+    AnimationClip = {
+        Loop = false,
+    },
+    AnimationClipProvider = {},
+    AnimationConstraint = {
+        AngularDamping = 0, AngularStrength = 0, IsKinematic = false, LinearDamping = 0, LinearStrength = 0,
+        MaxForce = 0, MaxTorque = 0, Transform = "CFrame",
+    },
+    AnimationTrack = {
+        Looped = false, TimePosition = 0,
+    },
+    Animator = {
+        PreferLodEnabled = false,
+    },
+    AppStorageService = {},
+    AppUpdateService = {},
+    AssetDeliveryProxy = {
+        Interface = "", Port = 0, StartServer = false,
+    },
+    AssetPatchSettings = {
+        ContentId = "", OutputPath = "", PatchId = "",
+    },
+    AssetService = {
+        AllowInsertFreeAssets = false,
+    },
+    Atmosphere = {
+        Color = "Color3", Decay = "Color3", Density = 0.395, Glare = 0, Haze = 0, Offset = 0,
+    },
+    Attachment = {
+        Axis = "Vector3", CFrame = "CFrame", SecondaryAxis = "Vector3", Visible = false, WorldAxis = "Vector3",
+        WorldCFrame = "CFrame", WorldSecondaryAxis = "Vector3",
+    },
+    AudioAnalyzer = {
+        SpectrumEnabled = false,
+    },
+    AudioChorus = {
+        Bypass = false, Depth = 0, Mix = 0, Rate = 0,
+    },
+    AudioCompressor = {
+        Attack = 0, Bypass = false, MakeupGain = 0, Ratio = 0, Release = 0, Threshold = 0,
+    },
+    AudioDeviceInput = {
+        Active = false, Muted = false, Volume = 0,
+    },
+    AudioDistortion = {
+        Bypass = false, Level = 0,
+    },
+    AudioEcho = {
+        Bypass = false, DelayTime = 0, DryLevel = 0, Feedback = 0, RampTime = 0, WetLevel = 0,
+    },
+    AudioEmitter = {
+        AcousticSimulationEnabled = false, AudioInteractionGroup = "",
+    },
+    AudioEqualizer = {
+        Bypass = false, HighGain = 0, LowGain = 0, MidGain = 0, MidRange = "NumberRange",
+    },
+    AudioFader = {
+        Bypass = false, Volume = 0,
+    },
+    AudioFilter = {
+        Bypass = false, Frequency = 0, Gain = 0, Q = 0,
+    },
+    AudioFlanger = {
+        Bypass = false, Depth = 0, Mix = 0, Rate = 0,
+    },
+    AudioFocusService = {},
+    AudioGate = {
+        Attack = 0, Bypass = false, Release = 0, Threshold = "NumberRange",
+    },
+    AudioLimiter = {
+        Bypass = false, MaxLevel = 0, Release = 0,
+    },
+    AudioListener = {
+        AcousticSimulationEnabled = false, AudioInteractionGroup = "",
+    },
+    AudioPitchShifter = {
+        Bypass = false, Pitch = 0,
+    },
+    AudioPlayer = {
+        AutoLoad = false, AutoPlay = false, IsPlaying = false, LoopRegion = "NumberRange", Looping = false,
+        PlaybackRegion = "NumberRange", PlaybackSpeed = 0, TimePosition = 0, Volume = 0,
+    },
+    AudioRecorder = {
+        IsRecording = false,
+    },
+    AudioReverb = {
+        Bypass = false, DecayRatio = 0, DecayTime = 0, Density = 0, Diffusion = 0, DryLevel = 0,
+        EarlyDelayTime = 0, HighCutFrequency = 0, LateDelayTime = 0, LowShelfFrequency = 0, LowShelfGain = 0,
+        ReferenceFrequency = 0, WetLevel = 0,
+    },
+    AudioSearchParams = {
+        Album = "", Artist = "", MaxDuration = 0, MinDuration = 0, SearchKeyword = "", Tag = "",
+        Title = "",
+    },
+    AudioSpeechToText = {
+        Enabled = false, Text = "",
+    },
+    AudioTextToSpeech = {
+        IsPlaying = false, Looping = false, Pitch = 0, PlaybackSpeed = 0, Speed = 0, Text = "",
+        TimePosition = 0, VoiceId = "", Volume = 0,
+    },
+    AudioTremolo = {
+        Bypass = false, Depth = 0, Duty = 0, Frequency = 0, Shape = 0, Skew = 0, Square = 0,
+    },
+    AuroraScriptObject = {
+        FrameId = 0, LODLevel = 0, PriorFrameInvoked = 0,
+    },
+    AvatarChatService = {
+        ServerFeatures = 0,
+    },
+    AvatarCreationService = {},
+    AvatarEditorService = {},
+    BadgeService = {},
+    BallSocketConstraint = {
+        LimitsEnabled = false, MaxFrictionTorque = 0, Radius = 0, Restitution = 0, TwistLimitsEnabled = false,
+        TwistLowerAngle = 0, TwistUpperAngle = 0, UpperAngle = 0,
+    },
+    BaseCoreGuiConfiguration = {
+        Enabled = false,
+    },
+    BaseImportData = {
+        ImportName = "", ShouldImport = false,
+    },
+    BasePart = {
+        Anchored = false, AssemblyAngularVelocity = "Vector3", AssemblyLinearVelocity = "Vector3",
+        AudioCanCollide = false, CFrame = "CFrame", CanCollide = true, CanQuery = true, CanTouch = true,
+        CastShadow = true, CollisionGroup = "", Color = "Color3", EnableFluidForces = false, Locked = false,
+        Massless = false, MaterialVariant = "", PivotOffset = "CFrame", Reflectance = 0, RootPriority = 0,
+        Rotation = "Vector3", Size = "Vector3", Transparency = 0, CanFrameCached = true, Archivable = true,
+        FrontParamA = -0.5, FrontParamB = 0.5, BackParamA = -0.5, BackParamB = 0.5, LeftParamA = -0.5,
+        LeftParamB = 0.5, RightParamA = -0.5, RightParamB = 0.5, TopParamA = -0.5, TopParamB = 0.5,
+        BottomParamA = -0.5, BottomParamB = 0.5, Friction = 0.3, Elasticity = 0.2, ElasticityWeight = 1.0,
+        FrictionWeight = 1.0, CollisionGroupId = 0,
+    },
+    BaseScript = {
+        Disabled = false, Enabled = false,
+    },
+    BaseWrap = {
+        CageOrigin = "CFrame", ImportOrigin = "CFrame",
+    },
+    Beam = {
+        Brightness = 0, CurveSize0 = 0, CurveSize1 = 0, Enabled = true, FaceCamera = false, LightEmission = 0,
+        LightInfluence = 0, Segments = 10, TextureLength = 1, TextureSpeed = 0, Width0 = 1, Width1 = 1,
+        ZOffset = 0,
+    },
+    BillboardGui = {
+        Active = false, AlwaysOnTop = false, Brightness = 0, ClipsDescendants = false, DistanceStep = 0,
+        ExtentsOffset = "Vector3", ExtentsOffsetWorldSpace = "Vector3", LightInfluence = 0, MaxDistance = 100,
+        Size = "UDim2", SizeOffset = "Vector2", StudsOffset = "Vector3", StudsOffsetWorldSpace = "Vector3",
+        PixelsPerStud = 50,
+    },
+    BindableEvent = {},
+    BindableFunction = {},
+    BloomEffect = {
+        Intensity = 0.4, Size = 24, Threshold = 0.95, Enabled = true,
+    },
+    BlurEffect = {
+        Size = 24, Enabled = true,
+    },
+    BodyAngularVelocity = {
+        AngularVelocity = "Vector3", MaxTorque = "Vector3", P = 0,
+    },
+    BodyColors = {
+        HeadColor3 = "Color3", LeftArmColor3 = "Color3", LeftLegColor3 = "Color3", RightArmColor3 = "Color3",
+        RightLegColor3 = "Color3", TorsoColor3 = "Color3",
+    },
+    BodyForce = {
+        Force = "Vector3",
+    },
+    BodyGyro = {
+        CFrame = "CFrame", D = 0, MaxTorque = "Vector3", P = 0,
+    },
+    BodyPartDescription = {
+        AssetId = 0, Color = "Color3", HeadShape = "",
+    },
+    BodyPosition = {
+        D = 0, MaxForce = "Vector3", P = 0, Position = "Vector3",
+    },
+    BodyThrust = {
+        Force = "Vector3", Location = "Vector3",
+    },
+    BodyVelocity = {
+        MaxForce = "Vector3", P = 0, Velocity = "Vector3",
+    },
+    Bone = {
+        Transform = "CFrame",
+    },
+    BoolValue = {
+        Value = false,
+    },
+    BoxHandleAdornment = {
+        Size = "Vector3",
+    },
+    BubbleChatConfiguration = {
+        AdorneeName = "", BackgroundColor3 = "Color3", BackgroundTransparency = 0, BubbleDuration = 0,
+        BubblesSpacing = 0, Enabled = false, LocalPlayerStudsOffset = "Vector3", MaxBubbles = 0,
+        MaxDistance = 0, MinimizeDistance = 0, TailVisible = false, TextColor3 = "Color3", TextSize = 0,
+        VerticalStudsOffset = 0,
+    },
+    BubbleChatMessageProperties = {
+        BackgroundColor3 = "Color3", BackgroundTransparency = 0, TailVisible = false, TextColor3 = "Color3",
+        TextSize = 0,
+    },
+    BuoyancySensor = {
+        FullySubmerged = false, TouchingSurface = false,
+    },
+    CFrameValue = {
+        Value = "CFrame",
+    },
+    Camera = {
+        CFrame = "CFrame", DiagonalFieldOfView = 70, FieldOfView = 70, Focus = "CFrame", HeadLocked = true,
+        HeadScale = 1, MaxAxisFieldOfView = 70, VRTiltAndRollEnabled = false, CameraType = "Enum.CameraType.Custom",
+        CameraMinZoomDistance = 0.5, CameraMaxZoomDistance = 128, MaxRollAngleRight = 0, MaxRollAngleLeft = 0,
+        NearPlaneZ = -0.1, FieldOfViewMode = "Enum.FieldOfViewMode.Vertical",
+    },
+    CanvasGroup = {
+        GroupColor3 = "Color3", GroupTransparency = 0,
+    },
+    CaptureService = {},
+    CapturesViewConfiguration = {
+        Open = false,
+    },
+    ChannelSelectorSoundEffect = {
+        Channel = 0,
+    },
+    ChannelTabsConfiguration = {
+        BackgroundColor3 = "Color3", BackgroundTransparency = 0, Enabled = false, HoverBackgroundColor3 = "Color3",
+        SelectedTabTextColor3 = "Color3", TextColor3 = "Color3", TextSize = 0, TextStrokeColor3 = "Color3",
+        TextStrokeTransparency = 0,
+    },
+    CharacterMesh = {
+        BaseTextureId = 0, MeshId = 0, OverlayTextureId = 0,
+    },
+    Chat = {
+        BubbleChatEnabled = false, LoadDefaultChat = true, IsAutoMigrated = true, ModerationMode = "TextFilter",
+    },
+    ChatInputBarConfiguration = {
+        AutocompleteEnabled = false, BackgroundColor3 = "Color3", BackgroundTransparency = 0, Enabled = false,
+        PlaceholderColor3 = "Color3", TextColor3 = "Color3", TextSize = 0, TextStrokeColor3 = "Color3",
+        TextStrokeTransparency = 0,
+    },
+    ChatWindowConfiguration = {
+        BackgroundColor3 = "Color3", BackgroundTransparency = 0, Enabled = false, HeightScale = 0,
+        TextColor3 = "Color3", TextSize = 0, TextStrokeColor3 = "Color3", TextStrokeTransparency = 0,
+        WidthScale = 0,
+    },
+    ChatWindowMessageProperties = {
+        TextColor3 = "Color3", TextSize = 0, TextStrokeColor3 = "Color3", TextStrokeTransparency = 0,
+    },
+    ChorusSoundEffect = {
+        Depth = 0, Mix = 0, Rate = 0,
+    },
+    ClickDetector = {
+        MaxActivationDistance = 0,
+    },
+    ClimbController = {
+        AccelerationTime = 0, BalanceMaxTorque = 0, BalanceSpeed = 0, MoveMaxForce = 0,
+    },
+    Clothing = {
+        Color3 = "Color3",
+    },
+    Clouds = {
+        Color = "Color3", Cover = 0, Density = 0, Enabled = false,
+    },
+    CollectionService = {
+        NitrateScale = 1,
+    },
+    Color3Value = {
+        Value = "Color3",
+    },
+    ColorCorrectionEffect = {
+        Brightness = 0, Contrast = 0, Saturation = 0, TintColor = "Color3", Enabled = true,
+    },
+    CompressorSoundEffect = {
+        Attack = 0, GainMakeup = 0, Ratio = 0, Release = 0, Threshold = 0,
+    },
+    ConeHandleAdornment = {
+        Height = 0, Hollow = false, Radius = 0,
+    },
+    Configuration = {},
+    Constraint = {
+        Enabled = false, Visible = false,
+    },
+    ContentProvider = {
+        RequestQueueSize = 0, CacheAssets = false,
+    },
+    ContextActionService = {
+        NitrateScale = 1,
+    },
+    ControllerBase = {
+        BalanceRigidityEnabled = false, MoveSpeedFactor = 0,
+    },
+    ControllerManager = {
+        BaseMoveSpeed = 0, BaseTurnSpeed = 0, FacingDirection = "Vector3", MovingDirection = "Vector3",
+        UpDirection = "Vector3",
+    },
+    ControllerPartSensor = {
+        HitFrame = "CFrame", HitNormal = "Vector3", LadderSearchHeight = 0, LadderSearchOffset = 0,
+        SearchDistance = 0,
+    },
+    CylinderHandleAdornment = {
+        Angle = 0, Height = 0, InnerRadius = 0, Radius = 0,
+    },
+    CylindricalConstraint = {
+        AngularLimitsEnabled = false, AngularResponsiveness = 0, AngularRestitution = 0, AngularSpeed = 0,
+        AngularVelocity = 0, InclinationAngle = 0, LowerAngle = 0, MotorMaxAngularAcceleration = 0,
+        MotorMaxTorque = 0, RotationAxisVisible = false, ServoMaxTorque = 0, TargetAngle = 0, UpperAngle = 0,
+    },
+    DataModel = {
+        CreatorId = 0, CreatorType = "Enum.CreatorType.User", GameId = 0, Genre = "Enum.Genre.All",
+        JobId = "", PlaceId = 0, PlaceVersion = 0, PrivateServerId = "", PrivateServerOwnerId = 0,
+        Workspace = nil, Guid = "",
+    },
+    DataModelMesh = {
+        Offset = "Vector3", Scale = "Vector3", VertexColor = "Vector3",
+    },
+    DataStoreGetOptions = {
+        UseCache = false,
+    },
+    DataStoreOptions = {
+        AllScopes = false,
+    },
+    DataStoreService = {
+        LegacyNamingScheme = false, AutomaticRetry = true,
+    },
+    Debris = {
+        MaxItems = 1000,
+    },
+    DebuggerBreakpoint = {
+        Condition = "", ContinueExecution = false, IsEnabled = false, LogExpression = "", isContextDependentBreakpoint = false,
+    },
+    DebuggerWatch = {
+        Expression = "",
+    },
+    Decal = {
+        AutoLocalize = false, Color3 = "Color3", Rotation = 0, Transparency = 0, UVOffset = "Vector2",
+        UVScale = "Vector2", ZIndex = 1, Shiny = 0, Specular = 0,
+    },
+    DepthOfFieldEffect = {
+        FarIntensity = 0, FocusDistance = 0, InFocusRadius = 0, NearIntensity = 0, Enabled = true,
+        FocalLength = 25,
+    },
+    Dialog = {
+        ConversationDistance = 0, GoodbyeChoiceActive = false, GoodbyeDialog = "", InUse = false,
+        InitialPrompt = "", TriggerDistance = 0, TriggerOffset = "Vector3",
+    },
+    DialogChoice = {
+        GoodbyeChoiceActive = false, GoodbyeDialog = "", ResponseDialog = "", UserDialog = "",
+    },
+    DigitsRigDescription = {
+        Index1TposeAdjustment = "CFrame", Index2TposeAdjustment = "CFrame", Index3TposeAdjustment = "CFrame",
+        IndexRange = "Vector3", IndexSize = 0, Middle1TposeAdjustment = "CFrame", Middle2TposeAdjustment = "CFrame",
+        Middle3TposeAdjustment = "CFrame", MiddleRange = "Vector3", MiddleSize = 0, Pinky1TposeAdjustment = "CFrame",
+        Pinky2TposeAdjustment = "CFrame", Pinky3TposeAdjustment = "CFrame", PinkyRange = "Vector3",
+        PinkySize = 0, Ring1TposeAdjustment = "CFrame", Ring2TposeAdjustment = "CFrame", Ring3TposeAdjustment = "CFrame",
+        RingRange = "Vector3", RingSize = 0, Thumb1TposeAdjustment = "CFrame", Thumb2TposeAdjustment = "CFrame",
+        Thumb3TposeAdjustment = "CFrame", ThumbRange = "Vector3", ThumbSize = 0,
+    },
+    DistortionSoundEffect = {
+        Level = 0,
+    },
+    DoubleConstrainedValue = {
+        MaxValue = 0, MinValue = 0, Value = 0,
+    },
+    DragDetector = {
+        ApplyAtCenterOfMass = false, Axis = "Vector3", DragFrame = "CFrame", Enabled = false, MaxDragAngle = 0,
+        MaxDragTranslation = "Vector3", MaxForce = 0, MaxTorque = 0, MinDragAngle = 0, MinDragTranslation = "Vector3",
+        Orientation = "Vector3", Responsiveness = 0, RunLocally = false, SecondaryAxis = "Vector3",
+        TrackballRadialPullFactor = 0, TrackballRollFactor = 0, WorldAxis = "Vector3", WorldSecondaryAxis = "Vector3",
+    },
+    DraggerService = {
+        AlignDraggedObjects = false, AngleSnapEnabled = false, AngleSnapIncrement = 0, AnimateHover = false,
+        CollisionsEnabled = false, GeometrySnapColor = "Color3", HoverAnimateFrequency = 0, HoverThickness = 0,
+        JointsEnabled = false, LinearSnapEnabled = false, LinearSnapIncrement = 0, ShowHover = false,
+        ShowPivotIndicator = false,
+    },
+    DynamicRotate = {
+        BaseAngle = 0,
+    },
+    EchoSoundEffect = {
+        Delay = 0, DryLevel = 0, Feedback = 0, WetLevel = 0,
+    },
+    EqualizerSoundEffect = {
+        HighGain = 0, LowGain = 0, MidGain = 0,
+    },
+    EventIngestService = {},
+    ExperienceInviteOptions = {
+        InviteMessageId = "", InviteUser = 0, LaunchData = "", PromptMessage = "",
+    },
+    ExperienceStateCaptureService = {
+        HiddenSelectionEnabled = false,
+    },
+    Explosion = {
+        BlastPressure = 500000, BlastRadius = 8, DestroyJointRadiusPercent = 1, Position = "Vector3",
+        TimeScale = 1, Visible = true,
+    },
+    FaceAnimatorService = {
+        AudioAnimationEnabled = false, FlipHeadOrientation = false, VideoAnimationEnabled = false,
+    },
+    Fire = {
+        Color = "Color3", Enabled = true, Heat = 1, SecondaryColor = "Color3", Size = 1, TimeScale = 1,
+        Lifetime = 1, FadeTime = 1,
+    },
+    FlangeSoundEffect = {
+        Depth = 0, Mix = 0, Rate = 0,
+    },
+    FloorWire = {
+        CycleOffset = 0, StudsBetweenTextures = 0, TextureSize = "Vector2", Velocity = 0, WireRadius = 0,
+    },
+    FlyweightService = {},
+    Folder = {},
+    ForceField = {
+        Visible = false,
+    },
+    Frame = {
+        BackgroundTransparency = 1, BorderSizePixel = 0, Active = false, ClipsDescendants = false,
+        BackgroundColor = "Enum", BorderColor = "Enum",
+    },
+    FriendService = {},
+    FunctionalTest = {
+        Description = "",
+    },
+    GamepadService = {
+        GamepadCursorEnabled = false,
+    },
+    GeometryService = {},
+    GetTextBoundsParams = {
+        RichText = false, Size = 0, Text = "", Width = 0,
+    },
+    Glue = {
+        F0 = "Vector3", F1 = "Vector3", F2 = "Vector3", F3 = "Vector3",
+    },
+    GroundController = {
+        AccelerationLean = 0, AccelerationTime = 0, BalanceMaxTorque = 0, BalanceSpeed = 0, DecelerationTime = 0,
+        Friction = 0, FrictionWeight = 0, GroundOffset = 0, StandForce = 0, StandSpeed = 0, TurnSpeedFactor = 0,
+    },
+    GroupImportData = {
+        Anchored = false, ImportAsModelAsset = false, InsertInWorkspace = false,
+    },
+    GroupService = {},
+    GuiBase2d = {
+        AutoLocalize = false, SelectionGroup = false,
+    },
+    GuiBase3d = {
+        Color3 = "Color3", Transparency = 0, Visible = false,
+    },
+    GuiButton = {
+        AutoButtonColor = false, Modal = false, Selected = false,
+    },
+    GuiObject = {
+        Active = false, AnchorPoint = "Vector2", BackgroundColor3 = "Color3", BackgroundTransparency = 0,
+        BorderColor3 = "Color3", BorderSizePixel = 0, ClipsDescendants = false, Interactable = false,
+        LayoutOrder = 0, Position = "UDim2", Rotation = 0, Selectable = false, SelectionOrder = 0,
+        Size = "UDim2", Visible = false, ZIndex = 0,
+    },
+    GuiService = {
+        AutoSelectGuiEnabled = false, GuiNavigationEnabled = false, TouchControlsEnabled = true,
+        CoreGuiNavigationEnabled = false, SelectedObject = nil,
+    },
+    HandleAdornment = {
+        AlwaysOnTop = false, CFrame = "CFrame", SizeRelativeOffset = "Vector3", ZIndex = 0,
+    },
+    HapticEffect = {
+        Looped = false, Position = "Vector3", Radius = 0,
+    },
+    HapticService = {},
+    HeapProfilerService = {},
+    Highlight = {
+        Enabled = false, FillColor = "Color3", FillTransparency = 0, OutlineColor = "Color3", OutlineTransparency = 0,
+    },
+    HingeConstraint = {
+        AngularResponsiveness = 0, AngularSpeed = 0, AngularVelocity = 0, LimitsEnabled = false,
+        LowerAngle = 0, MotorMaxAcceleration = 0, MotorMaxTorque = 0, Radius = 0, Restitution = 0,
+        ServoMaxTorque = 0, TargetAngle = 0, UpperAngle = 0,
+    },
+    Hopper = {},
+    HopperBin = {
+        Active = false, ManualActivationOnly = false, CanBeDropped = true, ToolTip = "",
+    },
+    HttpRbxApiService = {},
+    HttpService = {
+        HttpEnabled = false,
+    },
+    Humanoid = {
+        AutoJumpEnabled = false, AutoRotate = true, AutomaticScalingEnabled = true, BreakJointsOnDeath = true,
+        CameraOffset = "Vector3", DisplayName = "", EvaluateStateMachine = false, Health = 100,
+        HealthDisplayDistance = 100, HipHeight = 0, Jump = false, JumpHeight = 7.2, JumpPower = 50,
+        MaxHealth = 100, MaxSlopeAngle = 89, NameDisplayDistance = 100, PlatformStand = false, RequiresNeck = true,
+        Sit = false, TargetPoint = "Vector3", UseJumpPower = false, WalkSpeed = 16, WalkToPoint = "Vector3",
+        CameraMaxZoomDistance = 128, CameraMinZoomDistance = 0.5, RigScale = 1, DisplayDistanceType = "Enum.HumanoidDisplayDistanceType.Viewer",
+        CollisionType = "Enum.HumanoidCollisionType.OuterSurface",
+    },
+    HumanoidDescription = {
+        BackAccessory = "", BodyTypeScale = 0, ClimbAnimation = 0, DepthScale = 0, Face = 0, FaceAccessory = "",
+        FallAnimation = 0, FrontAccessory = "", GraphicTShirt = 0, HairAccessory = "", HatAccessory = "",
+        Head = 0, HeadColor = "Color3", HeadScale = 0, HeightScale = 0, IdleAnimation = 0, JumpAnimation = 0,
+        LeftArm = 0, LeftArmColor = "Color3", LeftLeg = 0, LeftLegColor = "Color3", MoodAnimation = 0,
+        NeckAccessory = "", Pants = 0, ProportionScale = 0, RightArm = 0, RightArmColor = "Color3",
+        RightLeg = 0, RightLegColor = "Color3", RunAnimation = 0, Shirt = 0, ShouldersAccessory = "",
+        StaticFacialAnimation = false, SwimAnimation = 0, Torso = 0, TorsoColor = "Color3", UseAvatarSettings = false,
+        WaistAccessory = "", WalkAnimation = 0, WidthScale = 0,
+    },
+    HumanoidRigDescription = {
+        ChestRangeMax = "Vector3", ChestRangeMin = "Vector3", ChestSize = 0, ChestTposeAdjustment = "CFrame",
+        HeadBaseRangeMax = "Vector3", HeadBaseRangeMin = "Vector3", HeadBaseSize = 0, HeadBaseTposeAdjustment = "CFrame",
+        LeftAnkleRangeMax = "Vector3", LeftAnkleRangeMin = "Vector3", LeftAnkleSize = 0, LeftAnkleTposeAdjustment = "CFrame",
+        LeftClavicleRangeMax = "Vector3", LeftClavicleRangeMin = "Vector3", LeftClavicleSize = 0,
+        LeftClavicleTposeAdjustment = "CFrame", LeftElbowRangeMax = "Vector3", LeftElbowRangeMin = "Vector3",
+        LeftElbowSize = 0, LeftElbowTposeAdjustment = "CFrame", LeftHipRangeMax = "Vector3", LeftHipRangeMin = "Vector3",
+        LeftHipSize = 0, LeftHipTposeAdjustment = "CFrame", LeftKneeRangeMax = "Vector3", LeftKneeRangeMin = "Vector3",
+        LeftKneeSize = 0, LeftKneeTposeAdjustment = "CFrame", LeftShoulderRangeMax = "Vector3",
+        LeftShoulderRangeMin = "Vector3", LeftShoulderSize = 0, LeftShoulderTposeAdjustment = "CFrame",
+        LeftToeBaseRangeMax = "Vector3", LeftToeBaseRangeMin = "Vector3", LeftToeBaseSize = 0, LeftToeBaseTposeAdjustment = "CFrame",
+        LeftWristRangeMax = "Vector3", LeftWristRangeMin = "Vector3", LeftWristSize = 0, LeftWristTposeAdjustment = "CFrame",
+        NeckRangeMax = "Vector3", NeckRangeMin = "Vector3", NeckSize = 0, NeckTposeAdjustment = "CFrame",
+        RightAnkleRangeMax = "Vector3", RightAnkleRangeMin = "Vector3", RightAnkleSize = 0, RightAnkleTposeAdjustment = "CFrame",
+        RightClavicleRangeMax = "Vector3", RightClavicleRangeMin = "Vector3", RightClavicleSize = 0,
+        RightClavicleTposeAdjustment = "CFrame", RightElbowRangeMax = "Vector3", RightElbowRangeMin = "Vector3",
+        RightElbowSize = 0, RightElbowTposeAdjustment = "CFrame", RightHipRangeMax = "Vector3",
+        RightHipRangeMin = "Vector3", RightHipSize = 0, RightHipTposeAdjustment = "CFrame", RightKneeRangeMax = "Vector3",
+        RightKneeRangeMin = "Vector3", RightKneeSize = 0, RightKneeTposeAdjustment = "CFrame", RightShoulderRangeMax = "Vector3",
+        RightShoulderRangeMin = "Vector3", RightShoulderSize = 0, RightShoulderTposeAdjustment = "CFrame",
+        RightToeBaseRangeMax = "Vector3", RightToeBaseRangeMin = "Vector3", RightToeBaseSize = 0,
+        RightToeBaseTposeAdjustment = "CFrame", RightWristRangeMax = "Vector3", RightWristRangeMin = "Vector3",
+        RightWristSize = 0, RightWristTposeAdjustment = "CFrame", RootRangeMax = "Vector3", RootRangeMin = "Vector3",
+        RootSize = 0, RootTposeAdjustment = "CFrame", SpineRangeMax = "Vector3", SpineRangeMin = "Vector3",
+        SpineSize = 0, SpineTposeAdjustment = "CFrame", WaistRangeMax = "Vector3", WaistRangeMin = "Vector3",
+        WaistSize = 0, WaistTposeAdjustment = "CFrame",
+    },
+    IKControl = {
+        Enabled = false, EndEffectorOffset = "CFrame", Offset = "CFrame", Priority = 0, SmoothTime = 0,
+        Weight = 0,
+    },
+    IXPService = {},
+    ImageButton = {
+        ImageColor3 = "Color3", ImageRectOffset = "Vector2", ImageRectSize = "Vector2", ImageTransparency = 0,
+        SliceCenter = "Rect", SliceScale = 0, TileSize = "UDim2", ScaleType = "Enum.ScaleType.Stretch",
+        ResampleMode = "Enum.ResampleMode.Default", AutoButtonColor = true, BackgroundColor3 = "Color3",
+        BackgroundTransparency = 1, BorderSizePixel = 0,
+    },
+    ImageHandleAdornment = {
+        Size = "Vector2",
+    },
+    ImageLabel = {
+        ImageColor3 = "Color3", ImageRectOffset = "Vector2", ImageRectSize = "Vector2", ImageTransparency = 0,
+        SliceCenter = "Rect", SliceScale = 0, TileSize = "UDim2", ScaleType = "Enum.ScaleType.Stretch",
+        ResampleMode = "Enum.ResampleMode.Default", BackgroundColor3 = "Color3", BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+    },
+    IncrementalPatchBuilder = {
+        AddPathsToBundle = false, BuildDebouncePeriod = 0, HighCompression = false, SerializePatch = false,
+        UseFileLevelCompressionInsteadOfChunk = false, ZstdCompression = false,
+    },
+    InputAction = {
+        Enabled = false,
+    },
+    InputBinding = {
+        ClampMagnitudeToOne = false, PointerIndex = 0, PressedThreshold = 0, ReleasedThreshold = 0,
+        ResponseCurve = 0, Scale = 0, Vector2Scale = "Vector2", Vector3Scale = "Vector3",
+    },
+    InputContext = {
+        Enabled = false, Priority = 0, Sink = false,
+    },
+    InputObject = {
+        Delta = "Vector3", Position = "Vector3",
+    },
+    InsertService = {
+        AllowInsertFreeModels = false,
+    },
+    Instance = {
+        Archivable = false, Name = "", Sandboxed = false,
+    },
+    IntConstrainedValue = {
+        MaxValue = 0, MinValue = 0, Value = 0,
+    },
+    IntValue = {
+        Value = 0,
+    },
+    JointInstance = {
+        C0 = "CFrame", C1 = "CFrame", Enabled = false,
+    },
+    JointsService = {},
+    Keyframe = {
+        Time = 0,
+    },
+    KeyframeMarker = {
+        Value = "",
+    },
+    KeyframeSequenceProvider = {},
+    LayerCollector = {
+        Enabled = false, ResetOnSpawn = false,
+    },
+    Light = {
+        Brightness = 0, Color = "Color3", Enabled = false, Shadows = false,
+    },
+    Lighting = {
+        Ambient = "Color3", Brightness = 2, ClockTime = 14, ColorShift_Bottom = "Color3", ColorShift_Top = "Color3",
+        EnvironmentDiffuseScale = 1, EnvironmentSpecularScale = 1, ExposureCompensation = 0, FogColor = "Color3",
+        FogEnd = 100000, FogStart = 0, GeographicLatitude = 0, GlobalShadows = true, OutdoorAmbient = "Color3",
+        PrioritizeLightingQuality = false, ShadowSoftness = 0.2, TimeOfDay = "14:00:00", Technology = "Enum.Technology.Future",
+        ShadowColor = "Color3", Outlines = false,
+    },
+    LineForce = {
+        ApplyAtCenterOfMass = false, InverseSquareLaw = false, Magnitude = 0, MaxForce = 0, ReactionForceEnabled = false,
+    },
+    LineHandleAdornment = {
+        Length = 0, Thickness = 0,
+    },
+    LinearVelocity = {
+        ForceLimitsEnabled = false, LineDirection = "Vector3", LineVelocity = 0, MaxAxesForce = "Vector3",
+        MaxForce = 0, MaxPlanarAxesForce = "Vector2", PlaneVelocity = "Vector2", PrimaryTangentAxis = "Vector3",
+        ReactionForceEnabled = false, SecondaryTangentAxis = "Vector3", VectorVelocity = "Vector3",
+    },
+    LocalScript = {},
+    LocalizationService = {
+        ForcePlayModeGameLocaleId = "", ForcePlayModeRobloxLocaleId = "", IsTextScraperRunning = false,
+        RobloxForcePlayModeGameLocaleId = "", RobloxForcePlayModeRobloxLocaleId = "",
+    },
+    LocalizationTable = {
+        SourceLocaleId = "",
+    },
+    LogService = {},
+    MakeupDescription = {
+        AssetId = 0, Order = 0,
+    },
+    MarketplaceService = {
+        IsPurchaseSimulated = false,
+    },
+    MaterialGenerationService = {},
+    MaterialImportData = {
+        DiffuseFilePath = "", EmissiveFilePath = "", MetalnessFilePath = "", NormalFilePath = "",
+        RoughnessFilePath = "",
+    },
+    MaterialVariant = {
+        EmissiveStrength = 0, EmissiveTint = "Color3", StudsPerTile = 0,
+    },
+    MemStorageService = {},
+    MeshContentProvider = {},
+    MeshImportData = {
+        Anchored = false, CageMeshIntersectedPreview = false, CageNonManifoldPreview = false, CageOverlappingVerticesPreview = false,
+        CageUVMisMatchedPreview = false, DoubleSided = false, IgnoreVertexColors = false, IrrelevantCageModifiedPreview = false,
+        MeshHoleDetectedPreview = false, OuterCageFarExtendedFromMeshPreview = false, UseImportedPivot = false,
+    },
+    MeshPart = {
+        DoubleSided = false,
+    },
+    Message = {
+        Text = "",
+    },
+    MessageBusService = {},
+    MicroProfilerService = {
+        ContextLabel = "",
+    },
+    Model = {
+        WorldPivot = "CFrame",
+    },
+    ModuleScript = {
+        LinkedSource = "",
+    },
+    Motor = {
+        CurrentAngle = 0, DesiredAngle = 0, MaxVelocity = 0,
+    },
+    NetworkServer = {},
+    NetworkSettings = {
+        HttpProxyEnabled = false, HttpProxyURL = "", IncomingReplicationLag = 0, PrintJoinSizeBreakdown = false,
+        PrintPhysicsErrors = false, PrintStreamInstanceQuota = false, RandomizeJoinInstanceOrder = false,
+        RenderStreamedRegions = false, ShowActiveAnimationAsset = false,
+    },
+    NoCollisionConstraint = {
+        Enabled = false,
+    },
+    NotificationService = {
+        SelectedTheme = "",
+    },
+    NumberPose = {
+        Value = 0,
+    },
+    NumberValue = {
+        Value = 0,
+    },
+    OpenCloudService = {},
+    PackageLink = {
+        DefaultName = "", VersionNumber = 0,
+    },
+    Part = {
+        Shape = "Enum.PartType.Block", Material = "Enum.Material.Plastic", TopSurface = "Enum.SurfaceType.Smooth",
+        BottomSurface = "Enum.SurfaceType.Smooth", FrontSurface = "Enum.SurfaceType.Smooth", BackSurface = "Enum.SurfaceType.Smooth",
+        LeftSurface = "Enum.SurfaceType.Smooth", RightSurface = "Enum.SurfaceType.Smooth",
+    },
+    PartOperation = {
+        SmoothingAngle = 0, TriangleCount = 0, UsePartColor = false,
+    },
+    ParticleEmitter = {
+        Acceleration = "Vector3", Brightness = 1, Drag = 0, Enabled = true, FlipbookBlendFrames = true,
+        FlipbookFramerate = "NumberRange", FlipbookIncompatible = "", FlipbookSizeX = 0, FlipbookSizeY = 0,
+        FlipbookStartRandom = false, Lifetime = "NumberRange", LightEmission = 0, LightInfluence = 0,
+        LockedToPart = false, Rate = 10, RotSpeed = "NumberRange", Rotation = "NumberRange", ShapePartial = 0,
+        Speed = "NumberRange", SpreadAngle = "Vector2", TimeScale = 1, VelocityInheritance = 0,
+        WindAffectsDrag = false, ZOffset = 2,
+    },
+    PatchMapping = {
+        FlattenTree = false, PatchId = "", TargetPath = "",
+    },
+    Path2D = {
+        Closed = false, Color3 = "Color3", Thickness = 0, Visible = false, ZIndex = 0,
+    },
+    PathfindingLink = {
+        IsBidirectional = false, Label = "",
+    },
+    PathfindingModifier = {
+        Label = "", PassThrough = false,
+    },
+    PathfindingService = {
+        EmptyCutoff = 0,
+    },
+    PhysicsService = {
+        ThrottlePhysicsIslands = false, PhysicsEnvironmentalThrottle = "Enum.EnvironmentalPhysicsThrottle.DefaultAuto",
+    },
+    PitchShiftSoundEffect = {
+        Octave = 0,
+    },
+    PlatformFriendsService = {},
+    Player = {
+        AutoJumpEnabled = false, CameraMaxZoomDistance = 128, CameraMinZoomDistance = 0.5, CanLoadCharacterAppearance = true,
+        CharacterAppearanceId = 0, DevEnableMouseLock = false, DisplayName = "", HasRobloxSubscription = false,
+        HasVerifiedBadge = false, HealthDisplayDistance = 100, NameDisplayDistance = 100, Neutral = true,
+        UserId = 0, CharacterAppearance = "", ChatAvailabilityStatus = "", DataComplexityLimit = 600,
+        GameplayPaused = false, InputLatency = 0, MaximumSimulationRadius = 1000, OsPlatform = "",
+        PartyId = "", PlatformName = "", SimulationRadius = 0, StepIdOffset = 0, TeleportedIn = false,
+        VRDevice = "", VREnabled = false, userId = 0, CameraMode = "Enum.CameraMode.Custom", DevCameraOcclusionMode = "Enum.DevCameraOcclusionMode.Zoom",
+        DevComputerCameraMode = "Enum.DevComputerCameraMode.UserChoice", DevTouchCameraMode = "Enum.DevTouchCameraMode.UserChoice",
+    },
+    PlayerListConfiguration = {
+        Open = false,
+    },
+    Players = {
+        CharacterAutoLoads = true, RespawnTime = 5, MaxPlayers = 16, NumPlayers = 0, BanningEnabled = false,
+        BubbleChat = false, ClassicChat = true, MaxPlayersInternal = 16, LocalPlayer = nil, ShowFailedJoinPopup = false,
+    },
+    PluginAction = {
+        Text = "",
+    },
+    PluginGui = {
+        Title = "",
+    },
+    PluginMenu = {
+        Icon = "", Title = "",
+    },
+    PluginToolbarButton = {
+        ClickableWhenViewportHidden = false, Enabled = false,
+    },
+    PointLight = {
+        Range = 8, Brightness = 1, Shadows = false, Enabled = true, Color = "Color3",
+    },
+    PointsService = {},
+    PolicyService = {},
+    Pose = {
+        CFrame = "CFrame",
+    },
+    PoseBase = {
+        Weight = 0,
+    },
+    PostEffect = {
+        Enabled = false,
+    },
+    ProceduralModel = {
+        Size = "Vector3",
+    },
+    ProximityPrompt = {
+        ActionText = "", AutoLocalize = true, ClickablePrompt = true, Enabled = true, HoldDuration = 0,
+        MaxActivationDistance = 10, MaxIndicatorDistance = 12, ObjectText = "", RequiresLineOfSight = true,
+        UIOffset = "Vector2", MaxDistance = 10, Style = "Enum.ProximityPromptStyle.Default",
+    },
+    ProximityPromptService = {
+        Enabled = true, MaxIndicatorsVisible = 4, MaxPromptsVisible = 4, PromptButtonHolder = nil,
+    },
+    PyramidHandleAdornment = {
+        Height = 0, Sides = 0, Size = 0,
+    },
+    RbxAnalyticsService = {},
+    ReflectionMetadataClass = {
+        ExplorerImageIndex = 0, ExplorerOrder = 0, Insertable = false, PreferredParent = "",
+    },
+    ReflectionMetadataItem = {
+        Browsable = false, ClassCategory = "", ClientOnly = false, Constraint = "", Deprecated = false,
+        EditingDisabled = false, EditorType = "", FFlag = "", IsBackend = false, PropertyOrder = 0,
+        ScriptContext = "", ServerOnly = false, SliderScaling = "", UIMaximum = 0, UIMinimum = 0,
+        UINumTicks = 0,
+    },
+    RemoteEvent = {},
+    RemoteFunction = {},
+    RenderingTest = {
+        CFrame = "CFrame", ComparisonDiffThreshold = 0, ComparisonPsnrThreshold = 0, Description = "",
+        FieldOfView = 0, PerfTest = false, QualityAuto = false, QualityLevel = 0, RenderingTestFrameCount = 0,
+        ShouldSkip = false, Ticket = "", Timeout = 0,
+    },
+    ReplicatedFirst = {},
+    ReplicatedStorage = {},
+    ReverbSoundEffect = {
+        DecayTime = 0, Density = 0, Diffusion = 0, DryLevel = 0, WetLevel = 0,
+    },
+    RobloxReplicatedStorage = {},
+    RocketPropulsion = {
+        CartoonFactor = 0, MaxSpeed = 0, MaxThrust = 0, MaxTorque = "Vector3", TargetOffset = "Vector3",
+        TargetRadius = 0, ThrustD = 0, ThrustP = 0, TurnD = 0, TurnP = 0,
+    },
+    RodConstraint = {
+        Length = 0, LimitAngle0 = 0, LimitAngle1 = 0, LimitsEnabled = false, Thickness = 0,
+    },
+    RootImportData = {
+        AddModelToInventory = false, Anchored = false, AnimationIdForRestPose = 0, ExistingPackageId = "",
+        ImportAsModelAsset = false, ImportAsPackage = false, InsertInWorkspace = false, InsertWithScenePosition = false,
+        InvertNegativeFaces = false, KeepZeroInfluenceBones = false, MergeMeshes = false, PreferredUploadId = 0,
+        RigVisualization = false, ScaleFactor = 0, UseSceneOriginAsPivot = false, UsesCages = false,
+        ValidateUgcBody = false, VersionedAssetId = 0,
+    },
+    RopeConstraint = {
+        Length = 0, Restitution = 0, Thickness = 0, WinchEnabled = false, WinchForce = 0, WinchResponsiveness = 0,
+        WinchSpeed = 0, WinchTarget = 0,
+    },
+    RunService = {
+        ClientGitHash = "", FrameNumber = 0, RunState = "Enum.RunState.Running",
+    },
+    SafetyService = {
+        IsCaptureModeForReport = false,
+    },
+    ScreenGui = {
+        ClipToDeviceSafeArea = false, DisplayOrder = 0, IgnoreGuiInset = false,
+    },
+    ScreenshotHud = {
+        CameraButtonPosition = "UDim2", CloseButtonPosition = "UDim2", CloseWhenScreenshotTaken = false,
+        HideCoreGuiForCaptures = false, HidePlayerGuiForCaptures = false, Visible = false,
+    },
+    Script = {
+        Source = "",
+    },
+    ScriptContext = {
+        ScriptsDisabled = false,
+    },
+    ScriptProfilerService = {},
+    ScrollingFrame = {
+        CanvasPosition = "Vector2", CanvasSize = "UDim2", ScrollBarImageColor3 = "Color3", ScrollBarImageTransparency = 0,
+        ScrollBarThickness = 8, ScrollingEnabled = true, ElasticBehavior = "Enum.ElasticBehavior.Always",
+        AutomaticCanvasSize = "Enum.AutomaticSize.None",
+    },
+    Seat = {
+        Disabled = false, Occupant = nil, IsSit = true,
+    },
+    SelectionBox = {
+        LineThickness = 0.05, SurfaceColor3 = "Color3", SurfaceTransparency = 0, Transparency = 0,
+        Adornee = nil, Color3 = "Color3",
+    },
+    SelectionPointLasso = {
+        Point = "Vector3",
+    },
+    SelectionSphere = {
+        SurfaceColor3 = "Color3", SurfaceTransparency = 0,
+    },
+    SelfViewConfiguration = {
+        Open = false,
+    },
+    SessionService = {},
+    ShirtGraphic = {
+        Color3 = "Color3",
+    },
+    SkateboardPlatform = {
+        Steer = 0, StickyWheels = false, Throttle = 0,
+    },
+    Sky = {
+        CelestialBodiesShown = true, MoonAngularSize = 11, SkyboxOrientation = "Vector3", StarCount = 3000,
+        SunAngularSize = 11, SunEnabled = true, MoonEnabled = true, SunTextureId = "rbxassetid://1683788242",
+        MoonTextureId = "rbxasset://sky/moon.jpg", SkyboxBk = "rbxasset://textures/sky/sky512_bk.tex",
+        SkyboxDn = "rbxasset://textures/sky/sky512_dn.tex", SkyboxFt = "rbxasset://textures/sky/sky512_ft.tex",
+        SkyboxLf = "rbxasset://textures/sky/sky512_lf.tex", SkyboxRt = "rbxasset://textures/sky/sky512_rt.tex",
+        SkyboxUp = "rbxasset://textures/sky/sky512_up.tex",
+    },
+    SlidingBallConstraint = {
+        LimitsEnabled = false, LinearResponsiveness = 0, LowerLimit = 0, MotorMaxAcceleration = 0,
+        MotorMaxForce = 0, Restitution = 0, ServoMaxForce = 0, Size = 0, Speed = 0, TargetPosition = 0,
+        UpperLimit = 0, Velocity = 0,
+    },
+    Smoke = {
+        Color = "Color3", Enabled = true, Opacity = 0.5, RiseVelocity = 1, Size = 1, TimeScale = 1,
+        Lifetime = 1,
+    },
+    SocialService = {},
+    Sound = {
+        AcousticSimulationEnabled = false, LoopRegion = "NumberRange", Looped = false, PlayOnRemove = false,
+        PlaybackRegion = "NumberRange", PlaybackRegionsEnabled = false, PlaybackSpeed = 1, Playing = false,
+        RollOffMaxDistance = 10000, RollOffMinDistance = 10, TimePosition = 0, Volume = 0.5, Pitch = 1,
+        RollOffMode = "Enum.RollOffMode.Inverse", EmitterSize = 0, RollOffGain = 1, MaxDistance = 10000,
+        MinDistance = 10,
+    },
+    SoundEffect = {
+        Enabled = false, Priority = 0,
+    },
+    SoundGroup = {
+        Volume = 0,
+    },
+    SoundService = {
+        AcousticSimulationEnabled = false, DiffractionEnabled = false, DistanceFactor = 3.32, DopplerScale = 1,
+        ListenerCFrame = "CFrame", OcclusionEnabled = false, RespectFilteringEnabled = true, ReverbEnabled = false,
+        RolloffScale = 1, IsNewExpForAudioApiByDefault = "Enum.RolloutState.Rollout", AmbientReverb = "Enum.ReverbType.NoReverb",
+        AudioApiByDefault = "Enum.RolloutState.Rollout",
+    },
+    Sparkles = {
+        Enabled = true, SparkleColor = "Color3", TimeScale = 1, Lifetime = 1, SparkleCount = 24,
+    },
+    SpawnLocation = {
+        AllowTeamChangeOnTouch = false, Duration = 0, Enabled = false, Neutral = false,
+    },
+    SpecialMesh = {
+        Scale = "Vector3", Offset = "Vector3", MeshType = "Enum.MeshType.Brick", VertexColor = "Color3",
+        TextureID = "",
+    },
+    SphereHandleAdornment = {
+        Radius = 0,
+    },
+    SpotLight = {
+        Angle = 90, Range = 8, Brightness = 1, Shadows = false, Enabled = true, Face = "Enum.NormalId.Front",
+    },
+    SpringConstraint = {
+        Coils = 0, Damping = 0, FreeLength = 0, LimitsEnabled = false, MaxForce = 0, MaxLength = 0,
+        MinLength = 0, Radius = 0, Stiffness = 0, Thickness = 0,
+    },
+    StarterGui = {
+        ShowDevelopmentGui = true, ProcessUserInput = false, ResetPlayerGuiOnSpawn = true, ScreenOrientation = "Enum.ScreenOrientation.Landscape",
+        VRLaserPointerMode = "Enum.VRLaserPointerMode.Disabled",
+    },
+    StarterPlayer = {
+        AutoJumpEnabled = false, CameraMaxZoomDistance = 128, CameraMinZoomDistance = 0.5, CharacterBreakJointsOnDeath = true,
+        CharacterJumpHeight = 7.2, CharacterJumpPower = 50, CharacterMaxSlopeAngle = 89, CharacterUseJumpPower = false,
+        CharacterWalkSpeed = 16, ClassicDeath = true, EnableMouseLockOption = true, HealthDisplayDistance = 100,
+        LoadCharacterAppearance = true, NameDisplayDistance = 100, UserEmotesEnabled = true, AllowCustomAnimations = true,
+        CreateDefaultPlayerModule = true, PlayerModuleStatus = 0,
+    },
+    Stats = {
+        ProfilingWindow = "Enum.StatsProfilingWindow.TenSeconds",
+    },
+    StringValue = {
+        Value = "",
+    },
+    StudioAttachment = {
+        AutoHideParent = false, IsArrowVisible = false, Offset = "Vector2", SourceAnchorPoint = "Vector2",
+        TargetAnchorPoint = "Vector2",
+    },
+    StudioService = {
+        UseLocalSpace = false, AlignDraggedObjects = false, Secrets = "", HighlightColor = "Color3",
+    },
+    StyleDerive = {
+        Priority = 0,
+    },
+    StyleRule = {
+        Priority = 0, Selector = "",
+    },
+    SunRaysEffect = {
+        Intensity = 0.25, Spread = 1, Enabled = true,
+    },
+    SurfaceAppearance = {
+        Color = "Color3", EmissiveStrength = 0, EmissiveTint = "Color3",
+    },
+    SurfaceGui = {
+        AlwaysOnTop = false, Brightness = 0, CanvasSize = "Vector2", ClipsDescendants = false, LightInfluence = 0,
+        MaxDistance = 0, PixelsPerStud = 50, ToolPunchThroughDistance = 0, ZOffset = 0,
+    },
+    SurfaceGuiBase = {
+        Active = false,
+    },
+    SurfaceLight = {
+        Angle = 90, Range = 8, Brightness = 1, Shadows = false, Enabled = true, Face = "Enum.NormalId.Front",
+    },
+    SurfaceSelection = {
+        LineThickness = 0.05, Transparency = 0, Adornee = nil, Face = "Enum.NormalId.Top",
+    },
+    SwimController = {
+        AccelerationTime = 0, PitchMaxTorque = 0, PitchSpeedFactor = 0, RollMaxTorque = 0, RollSpeedFactor = 0,
+    },
+    SyncScriptBuilder = {
+        CoverageInfo = false, DebugInfo = false, PackAsSource = false,
+    },
+    Team = {
+        AutoAssignable = false,
+    },
+    Teams = {},
+    TelemetryService = {},
+    TeleportOptions = {
+        ReservedServerAccessCode = "", ServerInstanceId = "", ShouldReserveServer = false,
+    },
+    TeleportService = {
+        CustomizedTeleportUI = false,
+    },
+    Terrain = {
+        WaterColor = "Color3", WaterReflectance = 0, WaterTransparency = 0, WaterWaveSize = 0, WaterWaveSpeed = 0,
+        DecorationGridSize = 1024, GrassLength = "Enum.GrassSoleLength", SmoothVoxelsUpgraded = false,
+        Decoration = false,
+    },
+    TerrainDetail = {
+        EmissiveStrength = 0, EmissiveTint = "Color3", StudsPerTile = 0,
+    },
+    TestService = {
+        AutoRuns = false, Description = "", ExecuteWithStudioRun = false, IsPhysicsEnvironmentalThrottled = false,
+        IsSleepAllowed = false, NumberOfPlayers = 0, SimulateSecondsLag = 0, ThrottlePhysicsToRealtime = false,
+        Timeout = 0,
+    },
+    TextBox = {
+        ClearTextOnFocus = true, CursorPosition = -1, LineHeight = 0, MaxVisibleGraphemes = 0, MultiLine = false,
+        OpenTypeFeatures = "", PlaceholderColor3 = "Color3", PlaceholderText = "", RichText = false,
+        SelectionStart = -1, ShowNativeInput = true, Text = "", TextColor3 = "Color3", TextEditable = true,
+        TextScaled = false, TextSize = 14, TextStrokeColor3 = "Color3", TextStrokeTransparency = 0,
+        TextTransparency = 0, TextWrapped = false, BackgroundTransparency = 1, BorderSizePixel = 0,
+        TextXAlignment = "Enum.TextXAlignment.Left", TextYAlignment = "Enum.TextYAlignment.Center",
+        Font = "Enum.Font.SourceSans",
+    },
+    TextButton = {
+        LineHeight = 0, MaxVisibleGraphemes = 0, OpenTypeFeatures = "", RichText = false, Text = "",
+        TextColor3 = "Color3", TextScaled = false, TextSize = 14, TextStrokeColor3 = "Color3", TextStrokeTransparency = 0,
+        TextTransparency = 0, TextWrapped = false, AutoButtonColor = true, Modal = false, BackgroundTransparency = 1,
+        BorderSizePixel = 0, Font = "Enum.Font.SourceSans",
+    },
+    TextChatCommand = {
+        AutocompleteVisible = false, Enabled = false, PrimaryAlias = "", SecondaryAlias = "",
+    },
+    TextChatMessage = {
+        MessageId = "", Metadata = "", PrefixText = "", Text = "", Timestamp = "DateTime", Translation = "",
+    },
+    TextChatMessageProperties = {
+        PrefixText = "", Text = "", Translation = "",
+    },
+    TextChatService = {
+        ChatTranslationEnabled = false, CreateDefaultCommands = true, CreateDefaultTextChannels = true,
+        ChatTranslationFTUXShown = false, ChatTranslationToggleEnabled = false, HasSeenDeprecationDialog = false,
+        IsLegacyChatDisabled = false,
+    },
+    TextGenerator = {
+        Seed = 0, SystemPrompt = "", Temperature = 0, TopP = 0,
+    },
+    TextLabel = {
+        LineHeight = 0, MaxVisibleGraphemes = 0, OpenTypeFeatures = "", RichText = false, Text = "",
+        TextColor3 = "Color3", TextScaled = false, TextSize = 14, TextStrokeColor3 = "Color3", TextStrokeTransparency = 0,
+        TextTransparency = 0, TextWrapped = false, BackgroundTransparency = 1, BorderSizePixel = 0,
+        TextXAlignment = "Enum.TextXAlignment.Left", TextYAlignment = "Enum.TextYAlignment.Center",
+        Font = "Enum.Font.SourceSans",
+    },
+    TextSource = {
+        CanSend = false,
+    },
+    Texture = {
+        OffsetStudsU = 0, OffsetStudsV = 0, StudsPerTileU = 1, StudsPerTileV = 1, Transparency = 0,
+        Color3 = "Color3",
+    },
+    TextureGenerationService = {},
+    Tool = {
+        CanBeDropped = true, Enabled = false, Grip = "CFrame", ManualActivationOnly = false, RequiresHandle = true,
+        ToolTip = "",
+    },
+    Torque = {
+        Torque = "Vector3",
+    },
+    TorsionSpringConstraint = {
+        Coils = 0, Damping = 0, LimitsEnabled = false, MaxAngle = 0, MaxTorque = 0, Radius = 0,
+        Restitution = 0, Stiffness = 0,
+    },
+    Trail = {
+        Brightness = 1, Enabled = true, FaceCamera = false, Lifetime = 1, LightEmission = 0, LightInfluence = 0,
+        MaxLength = 0, MinLength = 0.1, TextureLength = 1, TextureMode = "Enum.TextureMode.Stretch",
+    },
+    TremoloSoundEffect = {
+        Depth = 0, Duty = 0, Frequency = 0,
+    },
+    TweenService = {},
+    UGCValidationService = {},
+    UIAspectRatioConstraint = {
+        AspectRatio = 0,
+    },
+    UICorner = {
+        BottomLeftRadius = "UDim", BottomRightRadius = "UDim", CornerRadius = "UDim", TopLeftRadius = "UDim",
+        TopRightRadius = "UDim",
+    },
+    UIDragDetector = {
+        DragAxis = "Vector2", DragRotation = 0, DragUDim2 = "UDim2", Enabled = false, MaxDragAngle = 0,
+        MaxDragTranslation = "UDim2", MinDragAngle = 0, MinDragTranslation = "UDim2", SelectionModeDragSpeed = "UDim2",
+        SelectionModeRotateSpeed = 0,
+    },
+    UIFlexItem = {
+        GrowRatio = 0, ShrinkRatio = 0,
+    },
+    UIGradient = {
+        Enabled = false, Offset = "Vector2", Rotation = 0, Scale = 0,
+    },
+    UIGridLayout = {
+        CellPadding = "UDim2", CellSize = "UDim2", FillDirectionMaxCells = 0,
+    },
+    UIListLayout = {
+        Padding = "UDim", Wraps = false,
+    },
+    UIPadding = {
+        PaddingBottom = "UDim", PaddingLeft = "UDim", PaddingRight = "UDim", PaddingTop = "UDim",
+    },
+    UIPageLayout = {
+        Animated = false, Circular = false, GamepadInputEnabled = false, Padding = "UDim", ScrollWheelInputEnabled = false,
+        TouchInputEnabled = false, TweenTime = 0,
+    },
+    UIScale = {
+        Scale = 0,
+    },
+    UIShadow = {
+        BlurRadius = "UDim", Color = "Color3", Enabled = false, Offset = "UDim2", Spread = "UDim2",
+        Transparency = 0, ZIndex = 0,
+    },
+    UISizeConstraint = {
+        MaxSize = "Vector2", MinSize = "Vector2",
+    },
+    UIStroke = {
+        BorderOffset = "UDim", Color = "Color3", Enabled = false, Thickness = 0, Transparency = 0,
+        ZIndex = 0,
+    },
+    UITableLayout = {
+        FillEmptySpaceColumns = false, FillEmptySpaceRows = false, Padding = "UDim2",
+    },
+    UITextSizeConstraint = {
+        MaxTextSize = 0, MinTextSize = 0,
+    },
+    UniversalConstraint = {
+        LimitsEnabled = false, MaxAngle = 0, Radius = 0, Restitution = 0,
+    },
+    UserGameSettings = {
+        GamepadCameraSensitivity = 0, MouseSensitivity = 0, RCCProfilerRecordFrameRate = 0, RCCProfilerRecordTimeFrame = 0,
+        VRSmoothRotationEnabled = false, VignetteEnabled = false,
+    },
+    UserInputService = {
+        MouseDeltaSensitivity = 1, MouseIconEnabled = true, LegacyInputEventsEnabled = true, ModalEnabled = false,
+        AccelerometerEnabled = false, GamepadEnabled = true, GyroscopeEnabled = false, KeyboardEnabled = true,
+        TouchEnabled = false, VREnabled = false, MouseBehavior = "Enum.MouseBehavior.Default", MouseIcon = "rbxasset://textures/ArrowCursor.png",
+    },
+    UserService = {},
+    VRService = {
+        AvatarGestures = false, FadeOutViewOnCollision = true, QuestASWState = false, QuestDisplayRefreshRate = 0,
+        AutomaticThermalStatus = "Enum.RolloutState.Rollout",
+    },
+    Vector3Value = {
+        Value = "Vector3",
+    },
+    VectorForce = {
+        ApplyAtCenterOfMass = false, Force = "Vector3",
+    },
+    VehicleSeat = {
+        Disabled = false, HeadsUpDisplay = false, MaxSpeed = 0, Steer = 0, SteerFloat = 0, Throttle = 0,
+        ThrottleFloat = 0, Torque = 0, TurnSpeed = 0, IsSit = true,
+    },
+    VelocityMotor = {
+        CurrentAngle = 0, DesiredAngle = 0, MaxVelocity = 0,
+    },
+    VideoCaptureService = {
+        Active = false, CameraID = "",
+    },
+    VideoDeviceInput = {
+        Active = false, CameraId = "",
+    },
+    VideoDisplay = {
+        TileSize = "UDim2", VideoColor3 = "Color3", VideoRectOffset = "Vector2", VideoRectSize = "Vector2",
+        VideoTransparency = 0,
+    },
+    VideoFrame = {
+        Looped = false, Playing = false, RollOffMaxDistance = 0, RollOffMinDistance = 0, TimePosition = 0,
+        Volume = 0,
+    },
+    VideoPlayer = {
+        Looping = false, PlaybackSpeed = 0, TimePosition = 0, Volume = 0,
+    },
+    ViewportFrame = {
+        Ambient = "Color3", ImageColor3 = "Color3", ImageTransparency = 0, LightColor = "Color3",
+        LightDirection = "Vector3",
+    },
+    VoiceChatService = {
+        EnableDefaultVoice = true, UseNewAudioApi = "Enum.RolloutState.Rollout", UseNewControlPaths = false,
+        UseNewJoinFlow = "Enum.RolloutState.Rollout", UseStreamSwitching = "Enum.RolloutState.Rollout",
+        VoiceChatEnabledForPlaceOnRcc = false, VoiceChatEnabledForUniverseOnRcc = false,
+    },
+    WeldConstraint = {
+        Enabled = false,
+    },
+    Wire = {
+        SourceName = "", TargetName = "",
+    },
+    WireframeHandleAdornment = {
+        Scale = "Vector3", Thickness = 0,
+    },
+    Workspace = {
+        AirDensity = 0, AirTurbulenceIntensity = 0, AllowThirdPartySales = false, DistributedGameTime = 0,
+        FallHeightEnabled = false, FallenPartsDestroyHeight = -500, GlobalWind = "Vector3", Gravity = 196.2,
+        InsertPoint = "Vector3", StreamingEnabled = false, FilteringEnabled = true, StreamingMinRadius = 0,
+        StreamingTargetRadius = 0, TouchesUseCollisionGroups = false,
+    },
+    WorldModel = {},
+    WrapLayer = {
+        BindOffset = "CFrame", Enabled = false, Order = 0, ReferenceOrigin = "CFrame",
+    },
+    WrapTextureTransfer = {
+        UVMaxBound = "Vector2", UVMinBound = "Vector2",
+    },
+}
+
+
 makeProxy = function(name: string): any
     local children = {}
     local storedValues = {}
@@ -577,48 +2141,6 @@ makeProxy = function(name: string): any
         _storedValues = storedValues,
         _setKeys = setKeys,
     }
-    local numericPseudoProps = {
-        Magnitude = true, X = true, Y = true, Z = true,
-        W = true, Width = true, Height = true, Depth = true,
-        Value = true, Alpha = true, Beta = true,
-        StudsOffset = true, Radians = true,
-        UserId = true, AccountAge = true, AccountIdReplicate = true,
-        Health = true, MaxHealth = true, WalkSpeed = true, JumpPower = true,
-        JumpHeight = true, HipHeight = true,
-        CameraMinZoomDistance = true, CameraMaxZoomDistance = true,
-        Volume = true, Pitch = true, TimeLength = true, TimePosition = true,
-        VolumeAlt = true,
-        Brightness = true, FogEnd = true, FogStart = true,
-        Transparency = true, Reflectance = true, Rotation = true,
-        BorderSizePixel = true, ZIndex = true, LayoutOrder = true,
-        TextSize = true, TextTransparency = true, TextStrokeTransparency = true,
-        BackgroundTransparency = true,
-        FieldOfView = true, HeadScale = true,
-        ClockTime = true, GeographicLatitude = true,
-        ExposureCompensation = true,
-        Gravity = true, FallSpeed = true,
-        MaxForce = true, Force = true, Torque = true,
-        Period = true, Amplitude = true,
-        OffsetAngle = true, Angle = true,
-        FormFactor = true, Shape = true,
-        TopParamA = true, TopParamB = true, BottomParamA = true, BottomParamB = true,
-        LeftParamA = true, LeftParamB = true, RightParamA = true, RightParamB = true,
-        FrontParamA = true, FrontParamB = true, BackParamA = true, BackParamB = true,
-        Friction = true, Elasticity = true, ElasticityWeight = true, FrictionWeight = true,
-        Mass = true, MaxSlopeAngle = true,
-        MaxThrust = true, MaxSpeed = true, ThrustSpeed = true,
-        TargetOffset = true,
-        HipHeightScales = true, WalkSpeedScales = true,
-        CameraMinZoomDistance = true,
-        FallenPartsDestroyHeight = true, NetworkOwnershipAutoOffset = true,
-        DeleteOnFallenDestroy = true,
-        Absent = true,
-        WalkSpeedScale = true, WalkDirection = true,
-        DistributedGameTime = true,
-        Intensity = true, Brightness = true,
-        Threshold = true, BlurSize = true,
-        MaxBlurSize = true, Radius = true,
-    }
     mt.__index = function(t, k)
         tick()
         local ks = tostring(k)
@@ -631,17 +2153,23 @@ makeProxy = function(name: string): any
         if ks == "Parent" and destroyedInstances[name] then
             return nil
         end
-        if mt._className == "DataModel" and isApiServiceClass(ks) and serviceCache[ks] then
+        if mt._className == "DataModel" and isApiServiceClass(ks) then
+            if not serviceCache[ks] then
+                if SERVER_ONLY_SERVICES[ks] then
+                    error(ks .. " is not a valid member of DataModel \"DataModel\"", 2)
+                end
+                local svc = spyInstance(ks, ks:lower(), true)
+                serviceCache[ks] = svc
+                if ks == "Workspace" and workspaceProxy then
+                    serviceCache[ks] = workspaceProxy
+                end
+            end
             return serviceCache[ks]
         end
         if mt._className == "Players" and ks == "LocalPlayer" then
-            if mt._localPlayer then return mt._localPlayer end
             if not children[ks] then
-                local player = makeProxy("LocalPlayer")
+                local player = spyInstance("Player", "LocalPlayer", true)
                 local pmt = getmetatable(player)
-                pmt._className = "Player"
-                pmt._storedValues["ClassName"] = "Player"
-                pmt._setKeys["ClassName"] = true
                 pmt._storedValues["UserId"] = 0
                 pmt._setKeys["UserId"] = true
                 pmt._storedValues["Character"] = nil
@@ -652,11 +2180,7 @@ makeProxy = function(name: string): any
         end
         if mt._className == "Workspace" and ks == "CurrentCamera" then
             if not children[ks] then
-                local cam = makeProxy("CurrentCamera")
-                local cmt = getmetatable(cam)
-                cmt._className = "Camera"
-                cmt._storedValues["ClassName"] = "Camera"
-                cmt._setKeys["ClassName"] = true
+                local cam = spyInstance("Camera", "CurrentCamera", true)
                 children[ks] = cam
             end
             return children[ks]
@@ -833,26 +2357,129 @@ makeProxy = function(name: string): any
             return nil
         end
 
-        if not children[ks] then
-            local child = parentChildMap[name] and parentChildMap[name][ks]
-            if not child then
-                child = makeProxy(name .. "." .. ks)
-                local cmt = getmetatable(child)
-                cmt._parent = t
-                cmt._fieldName = ks
+        local cls = mt._className or ""
+        local clsInfo = getApiClassInfo(cls)
+        local chain = {}
+        local cur = clsInfo
+        while cur do
+            table.insert(chain, cur.name)
+            if type(cur.superclass) ~= "string" or cur.superclass == "" then break end
+            cur = getApiClassInfo(cur.superclass)
+        end
+        for i = 1, #chain do
+            local defaults = classDefaultProperties[chain[i]]
+            if defaults and defaults[ks] ~= nil then
+                local dv = defaults[ks]
+                if dv == "Color3" then
+                    local c = makeProxy(name .. "." .. ks)
+                    local cmt = getmetatable(c)
+                    cmt._ctorName = "Color3"
+                    cmt._ctorArgs = { 0.631373, 0.647059, 0.631373 }
+                    storedValues[ks] = c
+                    setKeys[ks] = true
+                    return c
+                elseif dv == "Vector3" then
+                    local v = makeProxy(name .. "." .. ks)
+                    local vmt = getmetatable(v)
+                    vmt._ctorName = "Vector3"
+                    vmt._ctorArgs = { 0, 0, 0 }
+                    storedValues[ks] = v
+                    setKeys[ks] = true
+                    return v
+                elseif dv == "Vector2" then
+                    local v = makeProxy(name .. "." .. ks)
+                    local vmt = getmetatable(v)
+                    vmt._ctorName = "Vector2"
+                    vmt._ctorArgs = { 0, 0 }
+                    storedValues[ks] = v
+                    setKeys[ks] = true
+                    return v
+                elseif dv == "UDim2" then
+                    local u = makeProxy(name .. "." .. ks)
+                    local umt = getmetatable(u)
+                    umt._ctorName = "UDim2"
+                    umt._ctorArgs = { 0, 0, 0, 0 }
+                    storedValues[ks] = u
+                    setKeys[ks] = true
+                    return u
+                elseif dv == "CFrame" then
+                    local cf = makeProxy(name .. "." .. ks)
+                    local cfmt = getmetatable(cf)
+                    cfmt._ctorName = "CFrame"
+                    cfmt._ctorArgs = { 0, 0, 0 }
+                    storedValues[ks] = cf
+                    setKeys[ks] = true
+                    return cf
+                elseif dv == "NumberRange" then
+                    local nr = makeProxy(name .. "." .. ks)
+                    local nrmt = getmetatable(nr)
+                    nrmt._ctorName = "NumberRange"
+                    nrmt._ctorArgs = { 0, 0 }
+                    storedValues[ks] = nr
+                    setKeys[ks] = true
+                    return nr
+                elseif type(dv) == "string" and dv:match("^Enum%.") then
+                    local enumItem = makeProxy(name .. "." .. ks)
+                    local eimt = getmetatable(enumItem)
+                    eimt._className = "EnumItem"
+                    eimt._ctorName = "EnumItem"
+                    eimt._storedValues["Name"] = dv:sub(dv:find("%.[^%.]*$") + 1, -1)
+                    eimt._storedValues["Value"] = 0
+                    eimt._storedValues["EnumType"] = dv:match("^Enum%.([%w_]+)%.")
+                    storedValues[ks] = enumItem
+                    setKeys[ks] = true
+                    return enumItem
+                else
+                    storedValues[ks] = dv
+                    setKeys[ks] = true
+                    return dv
+                end
             end
+        end
+
+        if booleanPseudoProps[ks] then
+            return false
+        end
+        if stringPseudoProps[ks] then
+            return ""
+        end
+        if color3PseudoProps[ks] then
+            local c = makeProxy(name .. "." .. ks)
+            local cmt = getmetatable(c)
+            cmt._ctorName = "Color3"
+            cmt._ctorArgs = { 0.631373, 0.647059, 0.631373 }
+            storedValues[ks] = c
+            setKeys[ks] = true
+            return c
+        end
+        if vector3PseudoProps[ks] then
+            local v = makeProxy(name .. "." .. ks)
+            local vmt = getmetatable(v)
+            vmt._ctorName = "Vector3"
+            vmt._ctorArgs = { 0, 0, 0 }
+            storedValues[ks] = v
+            setKeys[ks] = true
+            return v
+        end
+        if udim2PseudoProps[ks] then
+            local u = makeProxy(name .. "." .. ks)
+            local umt = getmetatable(u)
+            umt._ctorName = "UDim2"
+            umt._ctorArgs = { 0, 0, 0, 0 }
+            storedValues[ks] = u
+            setKeys[ks] = true
+            return u
+        end
+
+        if not children[ks] then
+            local child = makeProxy(name .. "." .. ks)
+            local cmt = getmetatable(child)
+            cmt._parent = t
+            cmt._fieldName = ks
             children[ks] = child
         end
         return children[ks]
     end
-    local positiveNumberProps = {
-        FieldOfView = true, WalkSpeed = true, JumpPower = true,
-        MaxHealth = true, Health = true, TextSize = true,
-        Volume = true, Brightness = true, Gravity = true,
-        CameraMinZoomDistance = true, CameraMaxZoomDistance = true,
-        MaxForce = true, Force = true, Torque = true,
-        MaxSpeed = true, MaxThrust = true,
-    }
     mt.__newindex = function(t, k, v)
         tick()
         local ks = tostring(k)
@@ -879,6 +2506,20 @@ makeProxy = function(name: string): any
             if not parentChildMap[parentName] then parentChildMap[parentName] = {} end
             parentChildMap[parentName][childDisplayName] = t
             parentChildMap[parentName][childName] = t
+            if storedValues["Anchored"] == false then
+                if not unanchoredParts[t] then
+                    unanchoredParts[t] = true
+                    awakePartsCount += 1
+                end
+            end
+        end
+        if ks == "Parent" and v == nil then
+            if unanchoredParts[t] then
+                unanchoredParts[t] = nil
+                if awakePartsCount > 0 then
+                    awakePartsCount -= 1
+                end
+            end
         end
         if ks == "AssemblyLinearVelocity" and isProxy(v) then
             local velMt = getmetatable(v)
@@ -886,16 +2527,29 @@ makeProxy = function(name: string): any
                 local vx = velMt._ctorArgs[1] or 0
                 storedValues["Position"] = makeProxy(name .. ".Position")
                 local posMt = getmetatable(storedValues["Position"])
-                posMt._ctorArgs = { vx * 0.1, 0, 0 }
+                posMt._ctorArgs = { 0, -500, 0 }
                 posMt._ctorName = "Vector3"
+                storedValues["Parent"] = nil
             end
         end
-        if ks == "Anchored" and v == false and storedValues["Position"] == nil then
-            storedValues["Position"] = makeProxy(name .. ".Position")
-            local posMt = getmetatable(storedValues["Position"])
-            posMt._ctorArgs = { 0, -500, 0 }
-            posMt._ctorName = "Vector3"
-            storedValues["Parent"] = nil
+        if ks == "Anchored" then
+            local cls = mt._className or ""
+            local isPartLike = (cls == "Part" or cls == "BasePart" or cls == "TrussPart" or cls == "WedgePart" or cls == "CornerWedgePart" or cls == "MeshPart" or cls == "UnionOperation" or cls == "NegateOperation" or cls == "Seat" or cls == "VehicleSeat")
+            if isPartLike and storedValues["Parent"] ~= nil then
+                if v == false then
+                    if not unanchoredParts[t] then
+                        unanchoredParts[t] = true
+                        awakePartsCount += 1
+                    end
+                else
+                    if unanchoredParts[t] then
+                        unanchoredParts[t] = nil
+                        if awakePartsCount > 0 then
+                            awakePartsCount -= 1
+                        end
+                    end
+                end
+            end
         end
         if isProxy(v) then
             markUsed(v)
@@ -980,6 +2634,10 @@ makeProxy = function(name: string): any
             if serviceName == "DebuggerManager" then
                 emit(string.format('local %s = %s:GetService(%s)', serviceName, parentName, serialize(firstArg)))
                 error("GetService: DebuggerManager not available", 0)
+            end
+            if SERVER_ONLY_SERVICES[serviceName] then
+                emit(string.format('local %s = %s:GetService(%s)', serviceName, parentName, serialize(firstArg)))
+                error("GetService: " .. serviceName .. " is not a valid service", 0)
             end
             if not isApiServiceClass(serviceName) then
                 emit(string.format('local %s = %s:GetService(%s)', serviceName, parentName, serialize(firstArg)))
@@ -1159,6 +2817,17 @@ makeProxy = function(name: string): any
             local parentName = proxyName(parent)
             emit(string.format('local %s = %s:GetMemStats()', retName, parentName))
             return { cpuLoad = 0, gpuLoad = 0, ram = 0, vram = 0 }
+        end
+
+        if isMethod and fieldName == "GetNumAwakeParts" and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('local %s = %s:GetNumAwakeParts()', retName, parentName))
+            local parentMt = getmetatable(parent)
+            local parentCls = parentMt and parentMt._className or ""
+            if parentCls == "Workspace" then
+                return awakePartsCount
+            end
+            return 0
         end
 
         if isMethod and fieldName == "GetCharacterAppearanceInfoAsync" and parent then
@@ -1527,48 +3196,18 @@ makeProxy = function(name: string): any
         if isMethod and fieldName == "GetChildren" and parent then
             local parentName = proxyName(parent)
             emit(string.format('%s:GetChildren()', parentName))
-            local list = {}
-            if parentChildMap[parentName] then
-                local seen = {}
-                for _, child in pairs(parentChildMap[parentName]) do
-                    local cmt = getmetatable(child)
-                    local cn = cmt and cmt._storedValues and cmt._storedValues["Name"] or cmt._name
-                    if not seen[cn] then
-                        seen[cn] = true
-                        table.insert(list, child)
-                    end
-                end
-            end
-            return list
+            return {}
         end
 
-        if isMethod and (fieldName == "GetChildren" or fieldName == "GetDescendants") and parent then
+        if isMethod and fieldName == "GetDescendants" and parent then
             local parentName = proxyName(parent)
-            emit(string.format('%s:%s()', parentName, fieldName))
-            local list = {}
-            local visited = {}
-            local function collect(pn)
-                if visited[pn] then return end
-                visited[pn] = true
-                if parentChildMap[pn] then
-                    for _, child in pairs(parentChildMap[pn]) do
-                        table.insert(list, child)
-                        if fieldName == "GetDescendants" then
-                            local cmt = getmetatable(child)
-                            if cmt then collect(cmt._name) end
-                        end
-                    end
-                end
-            end
-            collect(parentName)
-            return list
+            emit(string.format('%s:GetDescendants()', parentName))
+            return {}
         end
 
         if isMethod and fieldName == "GetPlayers" and parent then
             local parentName = proxyName(parent)
             emit(string.format('%s:GetPlayers()', parentName))
-            local lp = serviceCache["Players"] and getmetatable(serviceCache["Players"])._localPlayer
-            if lp then return { lp } end
             return {}
         end
 
@@ -1601,6 +3240,19 @@ makeProxy = function(name: string): any
         pmt._ctorArgs = { x, y, z }
         return proxy
     end
+    local function makeFastVector3(x, y, z, expr)
+        local retName = genVar("v")
+        if expr then
+            emit("local " .. retName .. " = " .. expr)
+        else
+            emit("local " .. retName .. " = Vector3.new(" .. serialize(x) .. ", " .. serialize(y) .. ", " .. serialize(z) .. ")")
+        end
+        local proxy = makeProxy(retName)
+        local pmt = getmetatable(proxy)
+        pmt._ctorName = "Vector3"
+        pmt._ctorArgs = { x, y, z }
+        return proxy
+    end
     local function getVector3Args(v)
         if isProxy(v) then
             local m = getmetatable(v)
@@ -1611,62 +3263,80 @@ makeProxy = function(name: string): any
         return nil
     end
     mt.__add = function(a, b)
-        local sa = isProxy(a) and proxyName(a) or serialize(a)
-        local sb = isProxy(b) and proxyName(b) or serialize(b)
-        markUsed(a); markUsed(b)
         local ax, ay, az = getVector3Args(a)
         local bx, by, bz = getVector3Args(b)
         if ax and bx then
-            return makeVector3FromArgs(ax + bx, ay + by, az + bz)
+            local sa = isProxy(a) and proxyName(a) or serialize(a)
+            local sb = isProxy(b) and proxyName(b) or serialize(b)
+            markUsed(a); markUsed(b)
+            return makeFastVector3(ax + bx, ay + by, az + bz, sa .. " + " .. sb)
         end
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
         local retName = genVar("v")
         emit(string.format('local %s = %s + %s', retName, sa, sb))
         return makeProxy(retName)
     end
     mt.__sub = function(a, b)
-        local sa = isProxy(a) and proxyName(a) or serialize(a)
-        local sb = isProxy(b) and proxyName(b) or serialize(b)
-        markUsed(a); markUsed(b)
         local ax, ay, az = getVector3Args(a)
         local bx, by, bz = getVector3Args(b)
         if ax and bx then
-            return makeVector3FromArgs(ax - bx, ay - by, az - bz)
+            local sa = isProxy(a) and proxyName(a) or serialize(a)
+            local sb = isProxy(b) and proxyName(b) or serialize(b)
+            markUsed(a); markUsed(b)
+            return makeFastVector3(ax - bx, ay - by, az - bz, sa .. " - " .. sb)
         end
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
         local retName = genVar("v")
         emit(string.format('local %s = %s - %s', retName, sa, sb))
         return makeProxy(retName)
     end
     mt.__mul = function(a, b)
-        local sa = isProxy(a) and proxyName(a) or serialize(a)
-        local sb = isProxy(b) and proxyName(b) or serialize(b)
-        markUsed(a); markUsed(b)
         local ax, ay, az = getVector3Args(a)
         local bx, by, bz = getVector3Args(b)
         if ax and bx then
-            return makeVector3FromArgs(ax * bx, ay * by, az * bz)
+            local sa = isProxy(a) and proxyName(a) or serialize(a)
+            local sb = isProxy(b) and proxyName(b) or serialize(b)
+            markUsed(a); markUsed(b)
+            return makeFastVector3(ax * bx, ay * by, az * bz, sa .. " * " .. sb)
         end
         if ax and type(b) == "number" then
-            return makeVector3FromArgs(ax * b, ay * b, az * b)
+            local sa = isProxy(a) and proxyName(a) or serialize(a)
+            markUsed(a)
+            return makeFastVector3(ax * b, ay * b, az * b, sa .. " * " .. serialize(b))
         end
         if type(a) == "number" and bx then
-            return makeVector3FromArgs(a * bx, a * by, a * bz)
+            local sb = isProxy(b) and proxyName(b) or serialize(b)
+            markUsed(b)
+            return makeFastVector3(a * bx, a * by, a * bz, serialize(a) .. " * " .. sb)
         end
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
         local retName = genVar("v")
         emit(string.format('local %s = %s * %s', retName, sa, sb))
         return makeProxy(retName)
     end
     mt.__div = function(a, b)
-        local sa = isProxy(a) and proxyName(a) or serialize(a)
-        local sb = isProxy(b) and proxyName(b) or serialize(b)
-        markUsed(a); markUsed(b)
         local ax, ay, az = getVector3Args(a)
         local bx, by, bz = getVector3Args(b)
         if ax and bx then
-            return makeVector3FromArgs(ax / bx, ay / by, az / bz)
+            local sa = isProxy(a) and proxyName(a) or serialize(a)
+            local sb = isProxy(b) and proxyName(b) or serialize(b)
+            markUsed(a); markUsed(b)
+            return makeFastVector3(ax / bx, ay / by, az / bz, sa .. " / " .. sb)
         end
         if ax and type(b) == "number" then
-            return makeVector3FromArgs(ax / b, ay / b, az / b)
+            local sa = isProxy(a) and proxyName(a) or serialize(a)
+            markUsed(a)
+            return makeFastVector3(ax / b, ay / b, az / b, sa .. " / " .. serialize(b))
         end
+        local sa = isProxy(a) and proxyName(a) or serialize(a)
+        local sb = isProxy(b) and proxyName(b) or serialize(b)
+        markUsed(a); markUsed(b)
         local retName = genVar("v")
         emit(string.format('local %s = %s / %s', retName, sa, sb))
         return makeProxy(retName)
@@ -1698,7 +3368,25 @@ makeProxy = function(name: string): any
     mt.__eq = function(a, b)
         if rawequal(a, b) then return true end
         if isProxy(a) and isProxy(b) then
-            return getmetatable(a)._name == getmetatable(b)._name
+            local am = getmetatable(a)
+            local bm = getmetatable(b)
+            if am._ctorName and am._ctorName == bm._ctorName and am._ctorArgs and bm._ctorArgs then
+                if #am._ctorArgs == #bm._ctorArgs then
+                    local allEq = true
+                    for i, v in ipairs(am._ctorArgs) do
+                        if v ~= bm._ctorArgs[i] then allEq = false break end
+                    end
+                    if allEq then return true end
+                end
+            end
+            if am._className and am._className == bm._className then
+                if am._storedValues and bm._storedValues then
+                    if am._storedValues["Name"] and bm._storedValues["Name"] and am._storedValues["Name"] == bm._storedValues["Name"] then
+                        return true
+                    end
+                end
+            end
+            return am._name == bm._name
         end
         return false
     end
@@ -1709,7 +3397,78 @@ makeProxy = function(name: string): any
     return setmetatable({}, mt)
 end
 
-local function spyInstance(className: string, name: string?, silent: boolean?): any
+applyClassDefaults = function(proxy: any, className: string)
+    local mt = getmetatable(proxy)
+    if not mt then return end
+    local clsInfo = getApiClassInfo(className)
+    local chain = {}
+    local cur = clsInfo
+    while cur do
+        table.insert(chain, cur.name)
+        if type(cur.superclass) ~= "string" or cur.superclass == "" then break end
+        cur = getApiClassInfo(cur.superclass)
+    end
+    for i = 1, #chain do
+        local defaults = classDefaultProperties[chain[i]]
+        if defaults then
+            for propName, dv in pairs(defaults) do
+                if not mt._setKeys[propName] then
+                    if dv == "Color3" then
+                        local c = makeProxy(mt._name .. "." .. propName)
+                        local cmt = getmetatable(c)
+                        cmt._ctorName = "Color3"
+                        cmt._ctorArgs = { 0.631373, 0.647059, 0.631373 }
+                        mt._storedValues[propName] = c
+                    elseif dv == "Vector3" then
+                        local v = makeProxy(mt._name .. "." .. propName)
+                        local vmt = getmetatable(v)
+                        vmt._ctorName = "Vector3"
+                        vmt._ctorArgs = { 0, 0, 0 }
+                        mt._storedValues[propName] = v
+                    elseif dv == "Vector2" then
+                        local v = makeProxy(mt._name .. "." .. propName)
+                        local vmt = getmetatable(v)
+                        vmt._ctorName = "Vector2"
+                        vmt._ctorArgs = { 0, 0 }
+                        mt._storedValues[propName] = v
+                    elseif dv == "UDim2" then
+                        local u = makeProxy(mt._name .. "." .. propName)
+                        local umt = getmetatable(u)
+                        umt._ctorName = "UDim2"
+                        umt._ctorArgs = { 0, 0, 0, 0 }
+                        mt._storedValues[propName] = u
+                    elseif dv == "CFrame" then
+                        local cf = makeProxy(mt._name .. "." .. propName)
+                        local cfmt = getmetatable(cf)
+                        cfmt._ctorName = "CFrame"
+                        cfmt._ctorArgs = { 0, 0, 0 }
+                        mt._storedValues[propName] = cf
+                    elseif dv == "NumberRange" then
+                        local nr = makeProxy(mt._name .. "." .. propName)
+                        local nrmt = getmetatable(nr)
+                        nrmt._ctorName = "NumberRange"
+                        nrmt._ctorArgs = { 0, 0 }
+                        mt._storedValues[propName] = nr
+                    elseif type(dv) == "string" and dv:match("^Enum%.") then
+                        local enumItem = makeProxy(mt._name .. "." .. propName)
+                        local eimt = getmetatable(enumItem)
+                        eimt._className = "EnumItem"
+                        eimt._ctorName = "EnumItem"
+                        eimt._storedValues["Name"] = dv:sub(dv:find("%.[^%.]*$") + 1, -1)
+                        eimt._storedValues["Value"] = 0
+                        eimt._storedValues["EnumType"] = dv:match("^Enum%.([%w_]+)%.")
+                        mt._storedValues[propName] = enumItem
+                    else
+                        mt._storedValues[propName] = dv
+                    end
+                    mt._setKeys[propName] = true
+                end
+            end
+        end
+    end
+end
+
+spyInstance = function(className: string, name: string?, silent: boolean?): any
     local varName = name or genVar("inst")
     if not silent then
         emit(string.format('local %s = Instance.new("%s")', varName, className))
@@ -1719,6 +3478,7 @@ local function spyInstance(className: string, name: string?, silent: boolean?): 
     mt._className = className
     mt._storedValues["ClassName"] = className
     mt._setKeys["ClassName"] = true
+    applyClassDefaults(proxy, className)
     return proxy
 end
 
@@ -1727,6 +3487,10 @@ local _realDebug = debug
 local _realDebugInfo = _realDebug and _realDebug.info or nil
 local _realDebugTraceback = _realDebug and _realDebug.traceback or nil
 local knownCFunctions = {}
+local functionAddrMap = setmetatable({}, { __mode = "k" })
+local frozenTables = setmetatable({}, { __mode = "k" })
+local readonlyTables = setmetatable({}, { __mode = "k" })
+local applyReadonlyGuard: (any) -> ()
 local function registerCFunctions(lib)
     if type(lib) == "table" then
         for k, v in pairs(lib) do
@@ -1828,23 +3592,157 @@ local function createEnv()
     env.string = copyLib(string)
     registerCFunctions(env.string)
     env.table = copyLib(table, {
-        isfrozen = function() return true end,
-        freeze = function(t) return t end,
+        isfrozen = function(t)
+            if type(t) ~= "table" then return false end
+            return frozenTables[t] == true
+        end,
+        freeze = function(t)
+            if type(t) ~= "table" then error("invalid argument #1 to 'freeze' (table expected)", 2) end
+            frozenTables[t] = true
+            applyReadonlyGuard(t)
+            return t
+        end,
         find = function() return nil end,
-        clone = function(t) return t end,
+        clone = function(t)
+            if type(t) ~= "table" then return t end
+            local c = {}
+            for k, v in pairs(t) do c[k] = v end
+            return c
+        end,
+        isfrozen = function(t)
+            if type(t) ~= "table" then return false end
+            return frozenTables[t] == true
+        end,
     })
+    local function checkFrozen(t, op, key)
+        if type(t) == "table" and (frozenTables[t] or readonlyTables[t]) then
+            local desc = op == "newindex" and ("attempt to modify a readonly table (" .. tostring(key) .. ")") or "attempt to modify a readonly table"
+            error(desc, 3)
+        end
+    end
+    local realSetmetatable = setmetatable
+    applyReadonlyGuard = function(t)
+        if type(t) ~= "table" then return end
+        if frozenTables[t] then
+            local snapshot = {}
+            for k, v in pairs(t) do snapshot[k] = v end
+            for k in pairs(t) do rawset(t, k, nil) end
+            local guardMt = {
+                __index = snapshot,
+                __newindex = function(tt, k, v)
+                    error("attempt to modify a readonly table", 2)
+                end,
+                _isReadonlyGuard = true,
+                _isFrozen = true,
+            }
+            realSetmetatable(t, guardMt)
+            return
+        end
+        local existingMt = getmetatable(t)
+        if existingMt and existingMt._isReadonlyGuard and existingMt._isFrozen then
+            return
+        end
+        if existingMt and existingMt.__newindex and not existingMt._isReadonlyGuard then
+            local prevNewindex = existingMt.__newindex
+            existingMt.__newindex = function(tt, k, v)
+                if readonlyTables[t] or frozenTables[t] then
+                    error("attempt to modify a readonly table", 2)
+                end
+                if type(prevNewindex) == "function" then
+                    prevNewindex(tt, k, v)
+                else
+                    rawset(tt, k, v)
+                end
+            end
+            existingMt._isReadonlyGuard = true
+            return
+        end
+        if existingMt == nil then
+            local guardMt = {
+                __newindex = function(tt, k, v)
+                    if readonlyTables[t] or frozenTables[t] then
+                        error("attempt to modify a readonly table", 2)
+                    end
+                    rawset(tt, k, v)
+                end,
+                _isReadonlyGuard = true,
+            }
+            realSetmetatable(t, guardMt)
+        end
+    end
     env.coroutine = copyLib(coroutine)
     env.os = setmetatable({
         time = os.time,
         date = os.date,
-        clock = os.clock,
+        clock = function()
+            local t = os.clock()
+            return t * 0.5
+        end,
         difftime = os.difftime,
     }, {
         _serialName = "os",
         __newindex = function() error("attempt to write to read-only library table", 2) end,
         __tostring = function() return "table: 0x" .. string.format("%x", math.random(1048576, 1099511627776)) end,
     })
-    env.debug = nil
+    env.debug = setmetatable({
+        info = function(f, what)
+            if type(f) == "function" then
+                if knownCFunctions[f] then
+                    if what == "s" then return "[C]" end
+                    if what == "l" then return -1 end
+                    if what == "n" then return "" end
+                    if what == "a" then return 0 end
+                    if what == "f" then return f end
+                    return "[C]"
+                end
+                local ok, src = pcall(_realDebugInfo, f, what)
+                if ok then return src end
+                return nil
+            end
+            if type(f) == "number" then
+                local ok, val = pcall(_realDebugInfo, f, what)
+                if ok then return val end
+                return nil
+            end
+            return nil
+        end,
+        traceback = function(msg, level)
+            if _realDebugTraceback then
+                local ok, tb = pcall(_realDebugTraceback, msg, level)
+                if ok then return tb end
+            end
+            return tostring(msg or "")
+        end,
+    }, {
+        __index = function(_, k)
+            if k == "getupvalue" then
+                return function(f, i)
+                    if type(f) ~= "function" then error("invalid argument #1 to 'getupvalue'", 2) end
+                    if knownCFunctions[f] then
+                        error("attempt to get upvalue of C closure", 2)
+                    end
+                    error("attempt to get upvalue of closure", 2)
+                end
+            end
+            if k == "setupvalue" then
+                return function(f, i, v)
+                    if type(f) ~= "function" then error("invalid argument #1 to 'setupvalue'", 2) end
+                    error("attempt to set upvalue of closure", 2)
+                end
+            end
+            if k == "setfenv" then
+                return function(f, env) error("setfenv: cannot change environment of given object", 2) end
+            end
+            if k == "getfenv" then
+                return function(level)
+                    if type(level) == "number" and level > 100 then return nil end
+                    return env
+                end
+            end
+            return nil
+        end,
+        __newindex = function() error("attempt to write to read-only library table", 2) end,
+    })
     env.io = nil
     local function wrapPcall(f, ...)
         local results = table.pack(pcall(f, ...))
@@ -1878,18 +3776,83 @@ local function createEnv()
             end
             return addr
         end
+        if type(v) == "function" then
+            if functionAddrMap[v] then return functionAddrMap[v] end
+            tostringCounter += 1
+            local id = tostringCounter
+            local hi = (id * 2654435761) % 0x10000
+            local lo = (id * 40503) % 0x100000000
+            local addr = string.format("function: 0x%04x%012x", hi, lo)
+            functionAddrMap[v] = addr
+            return addr
+        end
+        if type(v) == "userdata" then
+            local m = getmetatable(v)
+            if m and m._customAddr then return m._customAddr end
+            if m and m.__metatable ~= nil then return "userdata: " .. tostring(m.__metatable) end
+            tostringCounter += 1
+            local addr = string.format("userdata: 0x%x", tostringCounter * 26544357612345 % 0x10000000000000000 + 0x100000000)
+            if m then
+                m._customAddr = addr
+                return addr
+            end
+            return addr
+        end
         return tostring(v)
     end; env.type = type; env.select = select
-    env.unpack = table.unpack; env.rawget = rawget; env.rawset = rawset; env.rawequal = rawequal
-    env.rawlen = rawlen; env.setmetatable = setmetatable; env.getmetatable = function(t)
+    env.unpack = table.unpack; env.rawget = rawget; env.rawset = function(t, k, v)
+        if type(t) == "table" and (frozenTables[t] or readonlyTables[t]) then
+            error("attempt to modify a readonly table", 2)
+        end
+        return rawset(t, k, v)
+    end; env.rawequal = rawequal
+    env.rawlen = rawlen; env.setmetatable = function(t, mt)
+        if type(t) == "table" and (frozenTables[t] or readonlyTables[t]) then
+            error("attempt to modify a readonly table", 2)
+        end
+        local prevMt = getmetatable(t)
+        if type(mt) == "table" and prevMt and prevMt._isReadonlyGuard and prevMt._isReadonlyLocked then
+            local snapshot = prevMt.__index
+            if type(snapshot) == "table" then
+                for k, v in pairs(snapshot) do mt[k] = v end
+            end
+            local userNewindex = mt.__newindex
+            mt.__newindex = function(tt, k, v)
+                if readonlyTables[t] or frozenTables[t] then
+                    error("attempt to modify a readonly table", 2)
+                end
+                if type(userNewindex) == "function" then
+                    userNewindex(tt, k, v)
+                else
+                    rawset(tt, k, v)
+                end
+            end
+            mt._isReadonlyGuard = true
+        end
+        return realSetmetatable(t, mt)
+    end; env.getmetatable = function(t)
         if type(t) == "string" then return nil end
         local m = getmetatable(t)
+        if m and m._isReadonlyGuard and m._isReadonlyLocked then
+            local snapshot = m.__index
+            if type(snapshot) == "table" then return snapshot end
+            return nil
+        end
+        if m and m._isReadonlyGuard and m._isFrozen then
+            local snapshot = m.__index
+            if type(snapshot) == "table" then return snapshot end
+            return nil
+        end
+        if m and m._isReadonlyGuard and m._originalMt then return m._originalMt end
         if m and m.__metatable ~= nil then return m.__metatable end
         if m and m._isProxy then
             local cls = m._className or ""
             if cls == "DataModel" or cls == "Workspace" or cls == "Instance" then
                 return "The metatable is locked"
             end
+        end
+        if m and m._isReadonlyGuard then
+            return nil
         end
         return m
     end
@@ -2054,14 +4017,9 @@ local function createEnv()
     env.workspace = spyInstance("Workspace", "workspace", true)
     env.Workspace = env.workspace
     workspaceProxy = env.workspace
-    serviceCache["Workspace"] = env.workspace
     local wsMt = getmetatable(env.workspace)
     wsMt._storedValues["Parent"] = env.game
     wsMt._setKeys["Parent"] = true
-    wsMt._storedValues["Gravity"] = 196.2
-    wsMt._setKeys["Gravity"] = true
-    wsMt._storedValues["FallSpeed"] = 196.2
-    wsMt._setKeys["FallSpeed"] = true
     local baseplate = makeProxy("Baseplate")
     local bpMt = getmetatable(baseplate)
     bpMt._className = "Part"
@@ -2083,131 +4041,14 @@ local function createEnv()
     parentChildMap["workspace"]["Terrain"] = terrain
     env.script = spyInstance("LocalScript", "script", true)
 
-    do
-        local function setupService(name)
-            if not serviceCache[name] then
-                local p = makeProxy(name)
-                local m = getmetatable(p)
-                m._className = name
-                m._storedValues["ClassName"] = name
-                m._setKeys["ClassName"] = true
-                serviceCache[name] = p
-            end
-            return serviceCache[name]
-        end
-        local playersSvc = setupService("Players")
-        local playersMt = getmetatable(playersSvc)
-        local function rname() local s="" for _=1,math.random(5,10) do s=s..string.char(math.random(97,122)) end return s end
-        local lp = makeProxy("_localPlayer")
-        local lpMt = getmetatable(lp)
-        lpMt._className = "Player"
-        lpMt._storedValues["ClassName"] = "Player"
-        lpMt._setKeys["ClassName"] = true
-        local pn = rname()
-        lpMt._name = pn
-        lpMt._storedValues["Name"] = pn
-        lpMt._setKeys["Name"] = true
-        lpMt._storedValues["DisplayName"] = rname()
-        lpMt._setKeys["DisplayName"] = true
-        lpMt._storedValues["UserId"] = math.random(100000, 999999999)
-        lpMt._setKeys["UserId"] = true
-        lpMt._storedValues["AccountAge"] = math.random(1, 5000)
-        lpMt._setKeys["AccountAge"] = true
-        lpMt._storedValues["Neutral"] = false
-        lpMt._setKeys["Neutral"] = true
-        playersMt._localPlayer = lp
-        local char = makeProxy(pn .. "_char")
-        local charMt = getmetatable(char)
-        charMt._className = "Model"
-        charMt._storedValues["ClassName"] = "Model"
-        charMt._setKeys["ClassName"] = true
-        charMt._storedValues["Name"] = pn
-        charMt._setKeys["Name"] = true
-        charMt._storedValues["Parent"] = env.workspace
-        charMt._setKeys["Parent"] = true
-        lpMt._storedValues["Character"] = char
-        lpMt._setKeys["Character"] = true
-        if not parentChildMap["workspace"] then parentChildMap["workspace"] = {} end
-        parentChildMap["workspace"][pn] = char
-        local hum = makeProxy(pn .. "_hum")
-        local humMt = getmetatable(hum)
-        humMt._className = "Humanoid"
-        humMt._storedValues["ClassName"] = "Humanoid"
-        humMt._setKeys["ClassName"] = true
-        humMt._storedValues["Name"] = "Humanoid"
-        humMt._setKeys["Name"] = true
-        humMt._storedValues["Parent"] = char
-        humMt._setKeys["Parent"] = true
-        if not parentChildMap[pn .. "_char"] then parentChildMap[pn .. "_char"] = {} end
-        parentChildMap[pn .. "_char"]["Humanoid"] = hum
-        local hrp = makeProxy(pn .. "_hrp")
-        local hrpMt = getmetatable(hrp)
-        hrpMt._className = "Part"
-        hrpMt._storedValues["ClassName"] = "Part"
-        hrpMt._setKeys["ClassName"] = true
-        hrpMt._storedValues["Name"] = "HumanoidRootPart"
-        hrpMt._setKeys["Name"] = true
-        hrpMt._storedValues["Parent"] = char
-        hrpMt._setKeys["Parent"] = true
-        parentChildMap[pn .. "_char"]["HumanoidRootPart"] = hrp
-        local rs = setupService("ReplicatedStorage")
-        local rschat = makeProxy("_rsChat")
-        local rschatMt = getmetatable(rschat)
-        rschatMt._className = "Folder"
-        rschatMt._storedValues["ClassName"] = "Folder"
-        rschatMt._setKeys["ClassName"] = true
-        rschatMt._storedValues["Name"] = "DefaultChatSystemChatEvents"
-        rschatMt._setKeys["Name"] = true
-        if not parentChildMap["ReplicatedStorage"] then parentChildMap["ReplicatedStorage"] = {} end
-        parentChildMap["ReplicatedStorage"]["DefaultChatSystemChatEvents"] = rschat
-        local blockReq = makeProxy("_blockReq")
-        local blockReqMt = getmetatable(blockReq)
-        blockReqMt._className = "RemoteEvent"
-        blockReqMt._storedValues["ClassName"] = "RemoteEvent"
-        blockReqMt._setKeys["ClassName"] = true
-        blockReqMt._storedValues["Name"] = "SetBlockedUserIdsRequest"
-        blockReqMt._setKeys["Name"] = true
-        if not parentChildMap["_rsChat"] then parentChildMap["_rsChat"] = {} end
-        parentChildMap["_rsChat"]["SetBlockedUserIdsRequest"] = blockReq
-        local plrScripts = makeProxy("_plrScripts")
-        local plrScriptsMt = getmetatable(plrScripts)
-        plrScriptsMt._className = "Folder"
-        plrScriptsMt._storedValues["ClassName"] = "Folder"
-        plrScriptsMt._setKeys["ClassName"] = true
-        plrScriptsMt._storedValues["Name"] = "PlayerScripts"
-        plrScriptsMt._setKeys["Name"] = true
-        lpMt._storedValues["PlayerScripts"] = plrScripts
-        lpMt._setKeys["PlayerScripts"] = true
-        local rbxCharSounds = makeProxy("_rbxCharSounds")
-        local rbxCharSoundsMt = getmetatable(rbxCharSounds)
-        rbxCharSoundsMt._className = "Folder"
-        rbxCharSoundsMt._storedValues["ClassName"] = "Folder"
-        rbxCharSoundsMt._setKeys["ClassName"] = true
-        rbxCharSoundsMt._storedValues["Name"] = "RbxCharacterSounds"
-        rbxCharSoundsMt._setKeys["Name"] = true
-        if not parentChildMap["_plrScripts"] then parentChildMap["_plrScripts"] = {} end
-        parentChildMap["_plrScripts"]["RbxCharacterSounds"] = rbxCharSounds
-        local atomicBinding = makeProxy("_atomicBinding")
-        local atomicBindingMt = getmetatable(atomicBinding)
-        atomicBindingMt._className = "Part"
-        atomicBindingMt._storedValues["ClassName"] = "Part"
-        atomicBindingMt._setKeys["ClassName"] = true
-        atomicBindingMt._storedValues["Name"] = "AtomicBinding"
-        atomicBindingMt._setKeys["Name"] = true
-        atomicBindingMt._storedValues["Archivable"] = true
-        atomicBindingMt._setKeys["Archivable"] = true
-        if not parentChildMap["_rbxCharSounds"] then parentChildMap["_rbxCharSounds"] = {} end
-        parentChildMap["_rbxCharSounds"]["AtomicBinding"] = atomicBinding
-    end
-
     env.Instance = setmetatable({
         new = function(c)
             local cls = tostring(c or "Instance")
             if not getApiClassInfo(cls) then
-                error('Unable to create instance of type "' .. cls .. '"', 2)
+                error("Instance.new: invalid class '" .. cls .. "'", 2)
             end
             if not isApiCreatableClass(cls) then
-                error('Unable to create instance of type "' .. cls .. '"', 2)
+                error("Instance.new: cannot create class '" .. cls .. "'", 2)
             end
             local v = genVar("inst")
             emit(string.format('local %s = Instance.new("%s")', v, cls))
@@ -2216,6 +4057,7 @@ local function createEnv()
             mt._className = cls
             mt._storedValues["ClassName"] = cls
             mt._setKeys["ClassName"] = true
+            applyClassDefaults(proxy, cls)
             return proxy
         end,
     }, { __index = function(_, k) return makeProxy("Instance." .. tostring(k)) end })
@@ -2406,10 +4248,54 @@ local function createEnv()
     env.PathWaypoint = newCtor("PathWaypoint")
     env.Font = setmetatable({}, { __index = function(_, k) return makeProxy("Font." .. tostring(k)) end })
     env.buffer = setmetatable({
-        create = function(n) return { _data = string.rep("\0", n or 0) } end,
-        fromstring = function(s) return { _data = s or "" } end,
-        tostring = function(b) return b and b._data or "" end,
-        len = function(b) return b and #(b._data) or 0 end,
+        create = function(n)
+            if type(n) ~= "number" or n < 0 then error("invalid argument #1 to 'create' (size must be non-negative)", 2) end
+            return { _data = string.rep("\0", math.floor(n)), _size = math.floor(n) }
+        end,
+        fromstring = function(s)
+            s = s or ""
+            return { _data = s, _size = #s }
+        end,
+        tostring = function(b)
+            if type(b) ~= "table" or not b._data then error("invalid argument #1 to 'tostring' (buffer expected)", 2) end
+            return b._data
+        end,
+        len = function(b)
+            if type(b) ~= "table" then return 0 end
+            return b._size or #(b._data or "")
+        end,
+        copy = function(dst, dstOffset, src, srcOffset, count)
+            if type(dst) ~= "table" or type(src) ~= "table" then return end
+            count = count or 0
+            if dstOffset < 0 or srcOffset < 0 or count < 0 then error("buffer.copy: out of bounds", 2) end
+            if dstOffset + count > (dst._size or 0) then error("buffer.copy: write out of bounds", 2) end
+            if srcOffset + count > (src._size or 0) then error("buffer.copy: read out of bounds", 2) end
+        end,
+        fill = function(b, offset, val, count)
+            if type(b) ~= "table" then return end
+            count = count or 1
+            if offset + count > (b._size or 0) then error("buffer.fill: out of bounds", 2) end
+        end,
+        tobits = function(b) return {} end,
+        frombits = function(bits) return { _data = "", _size = 0 } end,
+        readi8 = function(b, o) if type(b)=="table" and (o<0 or o>=(b._size or 0)) then error("buffer.readi8: out of bounds", 2) end return 0 end,
+        readu8 = function(b, o) if type(b)=="table" and (o<0 or o>=(b._size or 0)) then error("buffer.readu8: out of bounds", 2) end return 0 end,
+        readi16 = function(b, o) if type(b)=="table" and (o<0 or o+1>=(b._size or 0)) then error("buffer.readi16: out of bounds", 2) end return 0 end,
+        readu16 = function(b, o) if type(b)=="table" and (o<0 or o+1>=(b._size or 0)) then error("buffer.readu16: out of bounds", 2) end return 0 end,
+        readi32 = function(b, o) if type(b)=="table" and (o<0 or o+3>=(b._size or 0)) then error("buffer.readi32: out of bounds", 2) end return 0 end,
+        readu32 = function(b, o) if type(b)=="table" and (o<0 or o+3>=(b._size or 0)) then error("buffer.readu32: out of bounds", 2) end return 0 end,
+        readf32 = function(b, o) if type(b)=="table" and (o<0 or o+3>=(b._size or 0)) then error("buffer.readf32: out of bounds", 2) end return 0 end,
+        readf64 = function(b, o) if type(b)=="table" and (o<0 or o+7>=(b._size or 0)) then error("buffer.readf64: out of bounds", 2) end return 0 end,
+        writei8 = function(b, o, v) if type(b)=="table" and (o<0 or o>=(b._size or 0)) then error("buffer.writei8: out of bounds", 2) end end,
+        writeu8 = function(b, o, v) if type(b)=="table" and (o<0 or o>=(b._size or 0)) then error("buffer.writeu8: out of bounds", 2) end end,
+        writei16 = function(b, o, v) if type(b)=="table" and (o<0 or o+1>=(b._size or 0)) then error("buffer.writei16: out of bounds", 2) end end,
+        writeu16 = function(b, o, v) if type(b)=="table" and (o<0 or o+1>=(b._size or 0)) then error("buffer.writeu16: out of bounds", 2) end end,
+        writei32 = function(b, o, v) if type(b)=="table" and (o<0 or o+3>=(b._size or 0)) then error("buffer.writei32: out of bounds", 2) end end,
+        writeu32 = function(b, o, v) if type(b)=="table" and (o<0 or o+3>=(b._size or 0)) then error("buffer.writeu32: out of bounds", 2) end end,
+        writef32 = function(b, o, v) if type(b)=="table" and (o<0 or o+3>=(b._size or 0)) then error("buffer.writef32: out of bounds", 2) end end,
+        writef64 = function(b, o, v) if type(b)=="table" and (o<0 or o+7>=(b._size or 0)) then error("buffer.writef64: out of bounds", 2) end end,
+        readstring = function(b, o, c) if type(b)=="table" and (o<0 or o+(c or 0)>(b._size or 0)) then error("buffer.readstring: out of bounds", 2) end return string.rep("l", c or 0) end,
+        writestring = function(b, o, s) if type(b)=="table" and (o<0 or o+#(s or "")>(b._size or 0)) then error("buffer.writestring: out of bounds", 2) end end,
     }, {
         _serialName = "buffer",
         __index = function() return function() end end,
@@ -2417,7 +4303,7 @@ local function createEnv()
     })
     env.Buffer = env.buffer
 
-    local YIELD_BUDGET = 1
+    local YIELD_BUDGET = 1000
     local yieldCount = 0
     local function yieldTick()
         yieldCount += 1
@@ -2443,21 +4329,22 @@ local function createEnv()
         spawn = function(f, ...)
             tick()
             local args = table.pack(...)
-            local results = table.pack(pcall(f, table.unpack(args, 1, args.n)))
-            return function() return table.unpack(results, 1, results.n) end
+            local co = coroutine.create(function() runCallback(f, table.unpack(args, 1, args.n)) end)
+            coroutine.resume(co)
+            return co
         end,
         delay = function(t, f)
             tick()
-            local results = table.pack(pcall(f))
-            return function() return table.unpack(results, 1, results.n) end
+            local co = coroutine.create(function() runCallback(f) end)
+            return co
         end,
-        cancel = function() end,
+        cancel = function(co) end,
         clock = function() return os.clock() end,
         defer = function(f, ...)
             tick()
             local args = table.pack(...)
-            local results = table.pack(pcall(f, table.unpack(args, 1, args.n)))
-            return function() return table.unpack(results, 1, results.n) end
+            local co = coroutine.create(function() runCallback(f, table.unpack(args, 1, args.n)) end)
+            return co
         end,
         synchronize = function() end,
         desynchronize = function() end,
@@ -2622,8 +4509,30 @@ local function createEnv()
     env.getnamecallmethod = function() return "" end
     env.setnamecallmethod = function() end
     env.setrawmetatable = function(t, mt) return setmetatable(t, mt) end
-    env.isreadonly = function() return false end
-    env.setreadonly = function() end
+    env.isreadonly = function(t)
+        if type(t) ~= "table" then return false end
+        return readonlyTables[t] == true or frozenTables[t] == true
+    end
+    env.setreadonly = function(t, flag)
+        if type(t) ~= "table" then return end
+        if flag == false or flag == nil then
+            readonlyTables[t] = nil
+        else
+            readonlyTables[t] = true
+            local snapshot = {}
+            for k, v in pairs(t) do snapshot[k] = v end
+            for k in pairs(t) do rawset(t, k, nil) end
+            local guardMt = {
+                __index = snapshot,
+                __newindex = function(tt, k, v)
+                    error("attempt to modify a readonly table", 2)
+                end,
+                _isReadonlyGuard = true,
+                _isReadonlyLocked = true,
+            }
+            realSetmetatable(t, guardMt)
+        end
+    end
     env.getrenderproperty = function() return nil end
     env.setrenderproperty = function() end
     env.cleardrawcache = function() end
@@ -2632,7 +4541,16 @@ local function createEnv()
     env.zstdcompress = function(s) return s end
     env.zstddecompress = function(s) return s end
     env.qrcode = function() return "" end
-    env.newproxy = function() return setmetatable({}, {}) end
+    env.newproxy = function(arg)
+        local proxy = newproxy(arg)
+        if arg == true then
+            local m = getmetatable(proxy)
+            if m then
+                m._isUserdataProxy = true
+            end
+        end
+        return proxy
+    end
     env.getgc = function() return {} end
     env.gcinfo = function() return 0 end
     env.collectgarbage = function() return 0 end
@@ -2655,7 +4573,6 @@ local function createEnv()
         load = true,
         loadstring = true,
         loadfile = true,
-        debug = true,
         io = true,
     }
     setmetatable(env, {
@@ -3128,6 +5045,11 @@ local function dump(source: string): string
     for k in pairs(destroyedInstances) do destroyedInstances[k] = nil end
     for k in pairs(memStorage) do memStorage[k] = nil end
     for k in pairs(parentChildMap) do parentChildMap[k] = nil end
+    awakePartsCount = 0
+    for k in pairs(unanchoredParts) do unanchoredParts[k] = nil end
+    for k in pairs(frozenTables) do frozenTables[k] = nil end
+    for k in pairs(readonlyTables) do readonlyTables[k] = nil end
+    for k in pairs(functionAddrMap) do functionAddrMap[k] = nil end
     emit("-- EnvLog output")
     emit("")
     local env = createEnv()
