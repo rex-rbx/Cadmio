@@ -348,6 +348,83 @@ end
 
 local makeProxy: (string) -> any
 
+local propertyTypes: { [string]: string } = {
+    Size = "Vector3", Position = "Vector3", CFrame = "CFrame",
+    Color = "Color3", Color3 = "Color3", BrickColor = "BrickColor",
+    Material = "EnumItem", Transparency = "number", Reflectance = "number",
+    Anchored = "boolean", CanCollide = "boolean", Locked = "boolean",
+    Name = "string", ClassName = "string", Parent = "Instance",
+    Source = "string", SourceAssetId = "number", Enabled = "boolean",
+    Value = "number", Text = "string", Font = "Font",
+    TextSize = "number", TextColor3 = "Color3", TextTransparency = "number",
+    BackgroundColor3 = "Color3", BackgroundTransparency = "number",
+    BorderSizePixel = "number", BorderColor3 = "Color3",
+    SizeConstraint = "EnumItem", PositionConstraint = "EnumItem",
+    Rotation = "number", ClipsDescendants = "boolean",
+    Active = "boolean", Visible = "boolean", ZIndex = "number",
+    LayoutOrder = "number", AutomaticSize = "EnumItem",
+    AnchorPoint = "UDim2", Offset = "UDim", Scale = "UDim",
+    TouchEnabled = "boolean", KeyboardEnabled = "boolean",
+    MouseEnabled = "boolean", GamepadEnabled = "boolean",
+    AccelerometerEnabled = "boolean", GyroscopeEnabled = "boolean",
+    VRDevice = "boolean", Ambient = "Color3",
+    Brightness = "number", TimeOfDay = "string", FogEnd = "number",
+    FogStart = "number", FogColor = "Color3", GlobalShadows = "boolean",
+    Outlines = "boolean", ShadowColor = "Color3",
+    Volume = "number", Pitch = "number", Looped = "boolean",
+    Playing = "boolean", TimeLength = "number", TimePosition = "number",
+    SoundId = "string", IsLoaded = "boolean",
+    WalkSpeed = "number", JumpPower = "number", JumpHeight = "number",
+    Health = "number", MaxHealth = "number", HipHeight = "number",
+    AutoRotate = "boolean", MoveDirection = "Vector3",
+    CameraMode = "EnumItem", CameraSubject = "Instance",
+    FieldOfView = "number", HeadScale = "number", ViewportSize = "Vector2",
+    ScreenOrientation = "EnumItem",
+    AbsolutePosition = "Vector3", AbsoluteSize = "Vector2", AbsoluteRotation = "number",
+    MouseIcon = "string", Icon = "string",
+    UserId = "number", AccountId = "string", Character = "Instance",
+    CharacterAppearanceId = "string", CharacterAppearance = "string",
+    Team = "Instance", TeamColor = "BrickColor", Neutral = "boolean",
+    Leadershipstats = "Instance",
+    RespawnTime = "number", Cameras = "Instance",
+    WalkToPoint = "Vector3", WalkToPart = "Instance",
+    PlatformStand = "boolean", Sit = "boolean",
+    MaxSlopeAngle = "number", HipHeightScales = "number",
+    CameraOffset = "Vector3", AutoJumpEnabled = "boolean",
+    DevCameraOcclusionMode = "EnumItem", DevComputerCameraMode = "EnumItem",
+    DevTouchCameraMode = "EnumItem",
+    DevEnableMouseLock = "boolean",
+    CameraMinZoomDistance = "number", CameraMaxZoomDistance = "number",
+    WalkSpeedScales = "number",
+    Mass = "number", CenterOfMass = "Vector3",
+    Inertia = "Vector3", Center = "Vector3",
+    ExtentsCFrame = "CFrame", ExtentsSize = "Vector3",
+    WorldCFrame = "CFrame", WorldPosition = "Vector3",
+    AssemblyLinearVelocity = "Vector3", AssemblyAngularVelocity = "Vector3",
+    AssemblyMass = "number", AssemblyCenterOfMass = "Vector3",
+    SleepInfo = "table",
+    CustomPhysicalProperties = "PhysicalProperties",
+    FrontSurface = "EnumItem", BackSurface = "EnumItem",
+    LeftSurface = "EnumItem", RightSurface = "EnumItem",
+    TopSurface = "EnumItem", BottomSurface = "EnumItem",
+    FrontSurfaceInput = "EnumItem", BackSurfaceInput = "EnumItem",
+    LeftSurfaceInput = "EnumItem", RightSurfaceInput = "EnumItem",
+    TopSurfaceInput = "EnumItem", BottomSurfaceInput = "EnumItem",
+    Friction = "number", Elasticity = "number", ElasticityWeight = "number",
+    FrictionWeight = "number",
+    Shape = "EnumItem", FormFactor = "EnumItem",
+    TweenInfo = "TweenInfo",
+    AmbientReverb = "EnumItem", DistanceFactor = "number",
+    DopplerScale = "number", EchoDoppler = "number",
+    RolloffScale = "number", ResampleFilter = "EnumItem",
+    InputDevice = "Instance", OutputDevice = "Instance",
+    SelectedObject = "Instance",
+    ResetPlayerGuiOnSpawn = "boolean",
+    FallenPartsDestroyHeight = "number",
+    Gravity = "number",
+    PlaceId = "number", JobId = "string", GameId = "number", CreatorId = "number",
+}
+
 local propertyChangeCallbacks: { [string]: { (any) -> () } } = {}
 local eventConnections: { { proxy: any, eventName: string, callback: (any) -> () } } = {}
 local instanceTags: { [string]: { string } } = {}
@@ -380,6 +457,7 @@ end
 makeProxy = function(name: string): any
     local children = {}
     local storedValues = {}
+    local setKeys = {}
     local mt = {
         _name = name,
         _isProxy = true,
@@ -387,6 +465,7 @@ makeProxy = function(name: string): any
         _fieldName = nil,
         _descriptive = false,
         _storedValues = storedValues,
+        _setKeys = setKeys,
     }
     local numericProps = {
         Magnitude = true, X = true, Y = true, Z = true,
@@ -420,6 +499,10 @@ makeProxy = function(name: string): any
         TargetOffset = true,
         HipHeightScales = true, WalkSpeedScales = true,
         CameraMinZoomDistance = true,
+        FallenPartsDestroyHeight = true, NetworkOwnershipAutoOffset = true,
+        DeleteOnFallenDestroy = true,
+        Absent = true,
+        WalkSpeedScale = true, WalkDirection = true,
     }
     local booleanProps = {
         Anchored = true, CanCollide = true, CanTouch = true, CanQuery = true,
@@ -502,11 +585,11 @@ makeProxy = function(name: string): any
     mt.__index = function(t, k)
         tick()
         local ks = tostring(k)
+        if setKeys[ks] then
+            return storedValues[ks]
+        end
         if ks == "Parent" and destroyedInstances[name] then
             return nil
-        end
-        if storedValues[ks] ~= nil then
-            return storedValues[ks]
         end
         if functionProps[ks] then
             if not children[ks] then
@@ -588,6 +671,7 @@ makeProxy = function(name: string): any
             v = 0
         end
         storedValues[ks] = v
+        setKeys[ks] = true
         if ks == "AssemblyLinearVelocity" and isProxy(v) then
             local velMt = getmetatable(v)
             if velMt and velMt._ctorArgs then
@@ -597,6 +681,13 @@ makeProxy = function(name: string): any
                 posMt._ctorArgs = { vx * 0.1, 0, 0 }
                 posMt._ctorName = "Vector3"
             end
+        end
+        if ks == "Anchored" and v == false and storedValues["Position"] == nil then
+            storedValues["Position"] = makeProxy(name .. ".Position")
+            local posMt = getmetatable(storedValues["Position"])
+            posMt._ctorArgs = { 0, -500, 0 }
+            posMt._ctorName = "Vector3"
+            storedValues["Parent"] = nil
         end
         if isProxy(v) then
             markUsed(v)
@@ -683,6 +774,7 @@ makeProxy = function(name: string): any
             local serviceMt = getmetatable(serviceProxy)
             serviceMt._className = serviceName
             serviceMt._storedValues["ClassName"] = serviceName
+            serviceMt._setKeys["ClassName"] = true
             serviceCache[serviceName] = serviceProxy
             emit(string.format('local %s = %s:GetService(%s)', serviceName, parentName, serialize(firstArg)))
             return serviceProxy
@@ -819,6 +911,31 @@ makeProxy = function(name: string): any
             end
         end
 
+        if isMethod and fieldName == "Create" and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('local %s = %s:Create(%s)', retName, parentName, table.concat(parts, ", ")))
+            local goal = args[startIdx + 2]
+            if type(goal) == "table" then
+                for k, v in pairs(goal) do
+                    if type(k) == "string" then
+                        local expected = propertyTypes[k]
+                        if expected then
+                            local actual = typeof(v)
+                            local basicType = type(v)
+                            if basicType == "string" and expected ~= "string" then
+                                error("Create: invalid property type for '" .. k .. "'", 0)
+                            elseif basicType == "boolean" and expected ~= "boolean" then
+                                error("Create: invalid property type for '" .. k .. "'", 0)
+                            elseif basicType == "number" and expected ~= "number" then
+                                error("Create: invalid property type for '" .. k .. "'", 0)
+                            end
+                        end
+                    end
+                end
+            end
+            return makeProxy(retName)
+        end
+
         if isMethod and (fieldName == "IsServer" or fieldName == "IsClient" or fieldName == "IsStudio") then
             local parentName = proxyName(parent)
             emit(string.format('local %s = %s:%s()', retName, parentName, fieldName))
@@ -850,19 +967,56 @@ makeProxy = function(name: string): any
             return serde.encode("json", firstArg)
         end
 
+        if isMethod and (fieldName == "GetProductInfo" or fieldName == "getProductInfo") and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('local %s = %s:GetProductInfo(%s)', retName, parentName, table.concat(parts, ", ")))
+            local id = firstArg
+            if type(id) ~= "number" or id ~= id or id < -1e20 or id > 1e20 then
+                error("GetProductInfo: invalid asset id", 0)
+            end
+            if select("#", ...) - startIdx + 1 > 2 then
+                error("GetProductInfo: too many arguments", 0)
+            end
+            return { AssetId = id, Name = "Asset", Description = "", Creator = { Id = 0, Name = "Creator" } }
+        end
+
+        if isMethod and fieldName == "GetCountryRegionForPlayerAsync" and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('local %s = %s:GetCountryRegionForPlayerAsync(%s)', retName, parentName, table.concat(parts, ", ")))
+            if type(firstArg) ~= "table" and type(firstArg) ~= "userdata" then
+                error("GetCountryRegionForPlayerAsync: invalid player argument", 0)
+            end
+            return "US"
+        end
+
+        if isMethod and fieldName == "UrlEncode" and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('local %s = %s:UrlEncode(%s)', retName, parentName, serialize(firstArg)))
+            if type(firstArg) == "string" then
+                return firstArg:gsub("[^%w%-_%.~]", function(c) return string.format("%%%02X", string.byte(c)) end)
+            end
+            return ""
+        end
+
         if isMethod and (fieldName == "JSONDecode" or fieldName == "jsonDecode") and parent then
             local parentName = proxyName(parent)
             emit(string.format('local %s = %s:JSONDecode(%s)', retName, parentName, table.concat(parts, ", ")))
-            if type(firstArg) == "string" then
-                return serde.decode("json", firstArg)
+            if type(firstArg) ~= "string" then
+                error("JSONDecode: invalid argument", 0)
             end
-            return {}
+            local ok, result = pcall(function() return serde.decode("json", firstArg) end)
+            if not ok then
+                error("JSONDecode: invalid JSON", 0)
+            end
+            return result
         end
 
         if isMethod and (fieldName == "GenerateGUID" or fieldName == "generateGUID") and parent then
             local parentName = proxyName(parent)
             emit(string.format('local %s = %s:GenerateGUID(%s)', retName, parentName, table.concat(parts, ", ")))
-            return "00000000-0000-0000-0000-000000000000"
+            local guidCounter = (_G._guidCounter or 0) + 1
+            _G._guidCounter = guidCounter
+            return string.format("{%08x-%04x-%04x-%04x-%012x}", guidCounter, guidCounter, guidCounter, guidCounter, guidCounter)
         end
 
         if isMethod and fieldName == "GetTagged" and parent then
@@ -1050,13 +1204,15 @@ local function spyInstance(className: string, name: string?, silent: boolean?): 
     local mt = getmetatable(proxy)
     mt._className = className
     mt._storedValues["ClassName"] = className
+    mt._setKeys["ClassName"] = true
     return proxy
 end
 
 local env
 local function createEnv()
     env = {}
-    env._G = env; env._ENV = env
+    env._G = {}
+    env._ENV = env
     local function copyLib(lib, extra)
         local c = {}
         for k, v in pairs(lib) do c[k] = v end
@@ -1221,77 +1377,6 @@ local function createEnv()
         __index = function(_, k) return function() return nil end end,
         __newindex = function() error("attempt to write to read-only library table", 2) end
     }); env.bit32 = copyLib(bit32); env.bit = env.bit32
-    local propertyTypes = {
-        Size = "Vector3", Position = "Vector3", CFrame = "CFrame",
-        Color = "Color3", Color3 = "Color3", BrickColor = "BrickColor",
-        Material = "EnumItem", Transparency = "number", Reflectance = "number",
-        Anchored = "boolean", CanCollide = "boolean", Locked = "boolean",
-        Name = "string", ClassName = "string", Parent = "Instance",
-        Source = "string", SourceAssetId = "number", Enabled = "boolean",
-        Value = "number", Text = "string", Font = "Font",
-        TextSize = "number", TextColor3 = "Color3", TextTransparency = "number",
-        BackgroundColor3 = "Color3", BackgroundTransparency = "number",
-        BorderSizePixel = "number", BorderColor3 = "Color3",
-        SizeConstraint = "EnumItem", PositionConstraint = "EnumItem",
-        Rotation = "number", ClipsDescendants = "boolean",
-        Active = "boolean", Visible = "boolean", ZIndex = "number",
-        LayoutOrder = "number", AutomaticSize = "EnumItem",
-        AnchorPoint = "UDim2", Offset = "UDim", Scale = "UDim",
-        TouchEnabled = "boolean", KeyboardEnabled = "boolean",
-        MouseEnabled = "boolean", GamepadEnabled = "boolean",
-        AccelerometerEnabled = "boolean", GyroscopeEnabled = "boolean",
-        VRDevice = "boolean", Ambient = "Color3",
-        Brightness = "number", TimeOfDay = "string", FogEnd = "number",
-        FogStart = "number", FogColor = "Color3", GlobalShadows = "boolean",
-        Outlines = "boolean", ShadowColor = "Color3",
-        Volume = "number", Pitch = "number", Looped = "boolean",
-        Playing = "boolean", TimeLength = "number", TimePosition = "number",
-        SoundId = "string", IsLoaded = "boolean",
-        WalkSpeed = "number", JumpPower = "number", JumpHeight = "number",
-        Health = "number", MaxHealth = "number", HipHeight = "number",
-        AutoRotate = "boolean", MoveDirection = "Vector3",
-        CameraMode = "EnumItem", CameraSubject = "Instance",
-        FieldOfView = "number", HeadScale = "number", ViewportSize = "Vector2",
-        ScreenOrientation = "EnumItem",
-        AbsolutePosition = "Vector3", AbsoluteSize = "Vector2", AbsoluteRotation = "number",
-        MouseIcon = "string", Icon = "string",
-        UserId = "number", AccountId = "string", Character = "Instance",
-        CharacterAppearanceId = "string", CharacterAppearance = "string",
-        Team = "Instance", TeamColor = "BrickColor", Neutral = "boolean",
-        Leadershipstats = "Instance",
-        RespawnTime = "number", Cameras = "Instance",
-        WalkToPoint = "Vector3", WalkToPart = "Instance",
-        PlatformStand = "boolean", Sit = "boolean",
-        MaxSlopeAngle = "number", HipHeightScales = "number",
-        CameraOffset = "Vector3", AutoJumpEnabled = "boolean",
-        DevCameraOcclusionMode = "EnumItem", DevComputerCameraMode = "EnumItem",
-        DevTouchCameraMode = "EnumItem",
-        DevEnableMouseLock = "boolean",
-        CameraMinZoomDistance = "number", CameraMaxZoomDistance = "number",
-        WalkSpeedScales = "number",
-        Mass = "number", CenterOfMass = "Vector3",
-        Inertia = "Vector3", Center = "Vector3",
-        ExtentsCFrame = "CFrame", ExtentsSize = "Vector3",
-        WorldCFrame = "CFrame", WorldPosition = "Vector3",
-        AssemblyLinearVelocity = "Vector3", AssemblyAngularVelocity = "Vector3",
-        AssemblyMass = "number", AssemblyCenterOfMass = "Vector3",
-        SleepInfo = "table",
-        CustomPhysicalProperties = "PhysicalProperties",
-        FrontSurface = "EnumItem", BackSurface = "EnumItem",
-        LeftSurface = "EnumItem", RightSurface = "EnumItem",
-        TopSurface = "EnumItem", BottomSurface = "EnumItem",
-        FrontSurfaceInput = "EnumItem", BackSurfaceInput = "EnumItem",
-        LeftSurfaceInput = "EnumItem", RightSurfaceInput = "EnumItem",
-        TopSurfaceInput = "EnumItem", BottomSurfaceInput = "EnumItem",
-        Friction = "number", Elasticity = "number", ElasticityWeight = "number",
-        FrictionWeight = "number",
-        Shape = "EnumItem", FormFactor = "EnumItem",
-        TweenInfo = "TweenInfo",
-        AmbientReverb = "EnumItem", DistanceFactor = "number",
-        DopplerScale = "number", EchoDoppler = "number",
-        RolloffScale = "number", ResampleFilter = "EnumItem",
-        InputDevice = "Instance", OutputDevice = "Instance",
-    }
     env.typeof = function(x)
         local t = type(x)
         if t == "table" then
@@ -1509,7 +1594,10 @@ local function createEnv()
         end
     end
     local taskTbl = {
-        wait = function() yieldTick(); tick(); return 0 end,
+        wait = function(time)
+            yieldTick(); tick()
+            return time or 0
+        end,
         spawn = function(f, ...) tick(); runCallback(f, ...) end,
         delay = function(t, f) tick(); runCallback(f) end,
         cancel = function() end,
@@ -1604,6 +1692,7 @@ local function createEnv()
     env.cloneref = function(ref) return ref end
     env.compareinstances = function(a, b) return a == b end
     env.loadstring = makeProxy("loadstring")
+    env.load = env.loadstring
     env.setclipboard = function() end
     env.getclipboard = function() return "" end
     env.readfile = function() return "" end
