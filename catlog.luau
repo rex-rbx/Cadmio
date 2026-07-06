@@ -196,8 +196,6 @@ if _game == nil and roblox ~= nil then
     if ok then _game = resolved end
 end
 
-print("hi")
-
 if _game ~= nil then
     local oldGetService = _game.GetService
 
