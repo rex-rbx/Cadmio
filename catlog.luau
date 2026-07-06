@@ -33,6 +33,56 @@ end
 local API_DUMP_PATH = "stuff/API-Dump.json"
 local apiClassesByName = {}
 
+local function getScriptDir(): string?
+    for level = 1, 16 do
+        local ok, source = pcall(debug.info, level, "s")
+        if not ok or type(source) ~= "string" or source == "" then
+            break
+        end
+        if source ~= "[C]" and source ~= "[C]" then
+            local path = source:match('^%[string "(.-)"%]$') or source:match("^@(.+)$") or source
+            local dir = path:match("(.*[/\\])")
+            if dir and dir ~= "" then
+                return dir
+            end
+        end
+    end
+    return nil
+end
+
+local SCRIPT_DIR = getScriptDir()
+
+local function resolveApiDumpPath(): string?
+    if type(Settings.api_dump) == "string" and Settings.api_dump ~= "" then
+        local ok = pcall(fs.readFile, Settings.api_dump)
+        if ok then return Settings.api_dump end
+    end
+    if type(process.env.CADMIO_API_DUMP) == "string" and process.env.CADMIO_API_DUMP ~= "" then
+        local ok = pcall(fs.readFile, process.env.CADMIO_API_DUMP)
+        if ok then return process.env.CADMIO_API_DUMP end
+    end
+    do
+        local ok = pcall(fs.readFile, API_DUMP_PATH)
+        if ok then return API_DUMP_PATH end
+    end
+    if SCRIPT_DIR then
+        local candidate = SCRIPT_DIR .. API_DUMP_PATH
+        local ok = pcall(fs.readFile, candidate)
+        if ok then return candidate end
+    end
+    local cwd = process.cwd or ""
+    for _ = 1, 6 do
+        if cwd == "" then break end
+        local candidate = cwd .. "/" .. API_DUMP_PATH
+        local ok = pcall(fs.readFile, candidate)
+        if ok then return candidate end
+        local parent = cwd:match("(.*)/[^/]*")
+        if not parent or parent == cwd then break end
+        cwd = parent
+    end
+    return nil
+end
+
 local NUMBER_PRIMITIVE_TYPES = {
     int = true,
     int64 = true,
@@ -69,8 +119,20 @@ local function normalizeApiType(typeInfo)
     }
 end
 
+local RESOLVED_API_DUMP_PATH = resolveApiDumpPath()
+
 local function loadApiDump()
-    local raw = fs.readFile(API_DUMP_PATH)
+    if not RESOLVED_API_DUMP_PATH then
+        local scriptDirHint = SCRIPT_DIR and (" (script dir: " .. SCRIPT_DIR .. ")") or ""
+        error(
+            "API dump not found. Looked for '" .. API_DUMP_PATH
+            .. "' relative to CWD, the script directory" .. scriptDirHint
+            .. ", and parent directories. You can pass an explicit path with"
+            .. " `api_dump=/abs/path/to/API-Dump.json` or set CADMIO_API_DUMP.",
+            0
+        )
+    end
+    local raw = fs.readFile(RESOLVED_API_DUMP_PATH)
     local decoded = serde.decode("json", raw)
 
     for _, classEntry in ipairs(decoded.Classes or {}) do
@@ -105,7 +167,8 @@ end
 
 local apiLoadOk, apiLoadErr = pcall(loadApiDump)
 if not apiLoadOk then
-    error("Failed to load API dump from " .. API_DUMP_PATH .. ": " .. tostring(apiLoadErr))
+    local location = RESOLVED_API_DUMP_PATH or API_DUMP_PATH
+    error("Failed to load API dump from " .. location .. ": " .. tostring(apiLoadErr))
 end
 
 local function getApiClassInfo(className)
@@ -1720,7 +1783,6 @@ local function createEnv()
         randomseed = function(seed) math.randomseed(seed) end,
     })
     registerCFunctions(env.math)
-    -- Explicitly register custom math functions as C closures
     for _, v in pairs(env.math) do
         if type(v) == "function" then knownCFunctions[v] = true end
     end
@@ -2310,7 +2372,6 @@ local function createEnv()
     env.isluau = function() return true end
     env.isourclosure = function() return false end
     env.isexecutorclosure = function() return false end
-    -- Register sandbox functions as C closures for iscclosure checks
     knownCFunctions[env.print] = true
     knownCFunctions[env.warn] = true
     knownCFunctions[env.pcall] = true
