@@ -348,7 +348,7 @@ local lines = {}
 local varCount = 0
 local usedVars = {}
 local opCount = 0
-local OP_BUDGET = 2000000
+local OP_BUDGET = 50000000
 local BUDGET_ERROR = "__OP_BUDGET_EXCEEDED__"
 
 local PARTIAL_DUMP_PATH = nil
@@ -2293,6 +2293,8 @@ makeProxy = function(name: string): any
                 pmt._setKeys["AccountAge"] = true
                 pmt._storedValues["DisplayName"] = "Player"
                 pmt._setKeys["DisplayName"] = true
+                pmt._storedValues["Parent"] = t
+                pmt._setKeys["Parent"] = true
                 children[ks] = player
             end
             return children[ks]
@@ -2937,9 +2939,19 @@ makeProxy = function(name: string): any
 
         local isStatementCall = isMethod and STATEMENT_METHODS[fieldName] ~= nil
 
-        if isMethod and fieldName == "GetService" and parent and type(firstArg) == "string" then
+        if isMethod and (fieldName == "GetService" or fieldName == "FindService" or fieldName == "findService") and parent and type(firstArg) == "string" then
             local parentName = proxyName(parent)
             local serviceName = firstArg
+            if fieldName == "FindService" or fieldName == "findService" then
+                if serviceCache[serviceName] then
+                    emit(string.format('local %s = %s:FindService(%s)', serviceName, parentName, serialize(firstArg)))
+                    return serviceCache[serviceName]
+                end
+                if not isApiServiceClass(serviceName) then
+                    emit(string.format('local %s = %s:FindService(%s)', serviceName, parentName, serialize(firstArg)))
+                    return nil
+                end
+            end
             if serviceName == "Workspace" or serviceName == "workspace" then
                 emit(string.format('local %s = %s:GetService(%s)', serviceName, parentName, serialize(firstArg)))
                 if workspaceProxy then
@@ -3139,6 +3151,12 @@ makeProxy = function(name: string): any
         if isMethod and fieldName == "Wait" then
             emit(string.format('local %s = %s()', retName, callExpr))
             local parentMt = getmetatable(parent)
+            if parentMt and parentMt._isTweenCompleted then
+                local dur = parentMt._tweenDuration or 0.3
+                if dur > 3 then dur = 0.5 end
+                pcall(task.wait, dur)
+                return makeProxy(retName)
+            end
             if parentMt and parentMt._fieldName == "CharacterAdded" then
                 local char = spyInstance("Model", "Character", true)
                 return char
@@ -3205,8 +3223,8 @@ makeProxy = function(name: string): any
         if isMethod and fieldName == "GetDebugId" and parent then
             local parentName = proxyName(parent)
             emit(string.format('local %s = %s:GetDebugId(%s)', retName, parentName, table.concat(parts, ", ")))
-            local id = string.format("%013d", math.random(100000000000, 999999999999))
-            return id
+            _G._debugIdCounter = (_G._debugIdCounter or 100000000000) + 1
+            return tostring(_G._debugIdCounter)
         end
 
         if isMethod and (fieldName == "PreloadAsync" or fieldName == "SendKeyEvent" or fieldName == "SendMouseButtonEvent" or fieldName == "SendMouseMoveEvent") and parent then
@@ -3361,6 +3379,24 @@ makeProxy = function(name: string): any
             tweenMt._className = "Tween"
             tweenMt._storedValues["ClassName"] = "Tween"
             tweenMt._setKeys["ClassName"] = true
+            local tweenInfo = args[startIdx + 1]
+            local duration = 0.3
+            if isProxy(tweenInfo) then
+                local tiMt = getmetatable(tweenInfo)
+                if tiMt and tiMt._ctorArgs and tiMt._ctorArgs[1] then
+                    duration = tonumber(tiMt._ctorArgs[1]) or 0.3
+                elseif tiMt and tiMt._storedValues and tiMt._storedValues["Time"] then
+                    duration = tonumber(tiMt._storedValues["Time"]) or 0.3
+                end
+            end
+            tweenMt._tweenDuration = duration
+            local completedSignal = makeProxy(retName .. ".Completed")
+            local csMt = getmetatable(completedSignal)
+            csMt._signalForEvent = { proxy = tweenProxy, eventName = "Completed" }
+            csMt._isTweenCompleted = true
+            csMt._tweenDuration = duration
+            tweenMt._storedValues["Completed"] = completedSignal
+            tweenMt._setKeys["Completed"] = true
             return tweenProxy
         end
 
@@ -5816,6 +5852,25 @@ local function createEnv()
         exit = function() emit("-- process.exit() called") end,
         args = {}, env = {}, cwd = function() return "/" end, os = "linux", pid = 1,
     }, { __index = function(_, k) return makeProxy("process." .. tostring(k)) end })
+
+    local hiddenFuncs = {}
+    for k, v in pairs(env) do
+        if type(k) == "string" and (k:lower():find("hook") or k:lower():find("closure")) then
+            hiddenFuncs[k] = v
+            env[k] = nil
+        end
+    end
+    local existingMt = getmetatable(env)
+    setmetatable(env, {
+        __index = function(t, k)
+            if hiddenFuncs[k] ~= nil then return hiddenFuncs[k] end
+            if existingMt and existingMt.__index then
+                if type(existingMt.__index) == "function" then return existingMt.__index(t, k) end
+                return existingMt.__index[k]
+            end
+            return nil
+        end,
+    })
 
     return env
 end
