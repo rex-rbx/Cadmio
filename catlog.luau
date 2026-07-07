@@ -2394,6 +2394,12 @@ makeProxy = function(name: string): any
             CreateEditableMesh = true,
             Disconnect = true, Connect = true, Once = true,
             PromptPremiumPurchase = true, PromptPurchase = true,
+            SendKeyEvent = true, SendMouseButtonEvent = true, SendMouseMoveEvent = true,
+            PreloadAsync = true, GetDebugId = true,
+            PointToWorldSpace = true, PointToObjectSpace = true,
+            VectorToWorldSpace = true, VectorToObjectSpace = true,
+            GetMinutesAfterMidnight = true, GetServerTimeNow = true,
+            ScreenPointToRay = true, ScreenToWorldPoint = true,
             GetProductInfo = true, GetDeveloperProductsAsync = true,
             GetTranslatorForLocaleAsync = true, GetTableEntries = true,
             RemoveItem = true,
@@ -2770,6 +2776,14 @@ makeProxy = function(name: string): any
         local ks = tostring(k)
         local cls = mt._className or ""
         local memberInfo = resolveApiMember(cls, ks)
+        if ks == "SelectedCoreObject" then
+            storedValues[ks] = v
+            setKeys[ks] = true
+            return
+        end
+        if ks == "PlaybackLoudness" then
+            error("PlaybackLoudness is read-only", 2)
+        end
         if memberInfo and not isWritablePropertyMember(memberInfo) then
             error("attempt to set a read-only property '" .. ks .. "'", 2)
         end
@@ -3186,6 +3200,37 @@ makeProxy = function(name: string): any
             emit(string.format('local %s = %s:%s(%s)', retName, parentName, fieldName, table.concat(parts, ", ")))
             if fieldName == "IsAvailable" then return false end
             return false
+        end
+
+        if isMethod and fieldName == "GetDebugId" and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('local %s = %s:GetDebugId(%s)', retName, parentName, table.concat(parts, ", ")))
+            local id = string.format("%013d", math.random(100000000000, 999999999999))
+            return id
+        end
+
+        if isMethod and (fieldName == "PreloadAsync" or fieldName == "SendKeyEvent" or fieldName == "SendMouseButtonEvent" or fieldName == "SendMouseMoveEvent") and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('%s:%s(%s)', parentName, fieldName, table.concat(parts, ", ")))
+            return
+        end
+
+        if isMethod and (fieldName == "ScreenPointToRay" or fieldName == "ScreenToWorldPoint" or fieldName == "WorldToScreenPoint") and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('local %s = %s:%s(%s)', retName, parentName, fieldName, table.concat(parts, ", ")))
+            local r = makeProxy(retName)
+            local rmt = getmetatable(r)
+            rmt._ctorName = "Ray"
+            local origin = makeDataProxy("Vector3", {0, 0, 0}, retName .. ".Origin")
+            local dir = makeDataProxy("Vector3", {0, 0, -1}, retName .. ".Direction")
+            rmt._storedValues = { Origin = origin, Direction = dir }
+            return r
+        end
+
+        if isMethod and (fieldName == "GetMinutesAfterMidnight" or fieldName == "GetServerTimeNow") and parent then
+            local parentName = proxyName(parent)
+            emit(string.format('local %s = %s:%s()', retName, parentName, fieldName))
+            return os.time() % 1440
         end
 
         if isMethod and fieldName == "GetCharacterAppearanceInfoAsync" and parent then
@@ -4493,7 +4538,7 @@ local function createEnv()
                 error("invalid argument #1 to 'info' (number or function expected)", 2)
             end
             if type(f) == "number" then
-                if f > 10 then return nil end
+                if f > 6 then return nil end
                 local results = {}
                 if type(what) == "string" and #what > 0 and what ~= "*" then
                     for i = 1, #what do
@@ -4670,7 +4715,11 @@ local function createEnv()
     env.tostring = function(v)
         if type(v) == "table" then
             local m = getmetatable(v)
-            if m and m._isProxy then return m._name or "Instance" end
+            if m and m._isProxy then
+                local storedName = m._storedValues and m._storedValues["Name"]
+                if storedName then return storedName end
+                return m._className or m._name or "Instance"
+            end
             if m and m._customAddr then return m._customAddr end
             tostringCounter += 1
             local addr = string.format("table: 0x%x", tostringCounter * 26544357612345 % 0x10000000000000000 + 0x100000000)
@@ -5004,6 +5053,8 @@ local function createEnv()
             mt._className = cls
             mt._storedValues["ClassName"] = cls
             mt._setKeys["ClassName"] = true
+            mt._storedValues["Name"] = cls
+            mt._setKeys["Name"] = true
             applyClassDefaults(proxy, cls)
             return proxy
         end,
@@ -5480,8 +5531,19 @@ local function createEnv()
     env.isluau = function() return true end
     env.getfpscap = function() return 60 end
     env.setfpscap = function() end
-    env.getidentity = function() return 2 end
-    env.getthreadidentity = function() return 2 end
+    env.getidentity = function() return 7 end
+    env.getthreadidentity = function() return 7 end
+    env.getthreadcontext = function() return 7 end
+    env.setidentity = function() end
+    env.isreadonly = function(t)
+        if type(t) == "table" then
+            local m = getmetatable(t)
+            if m and (m._isReadonlyGuard or m._isFrozen) then return true end
+            if m and m.__newindex and type(m.__newindex) == "function" then return true end
+            return frozenTables[t] == true or readonlyTables[t] == true
+        end
+        return true
+    end
     env.isourclosure = function() return false end
     env.isexecutorclosure = function() return false end
     knownCFunctions[env.print] = true
@@ -5506,6 +5568,9 @@ local function createEnv()
     knownCFunctions[env.getmetatable] = true
     knownCFunctions[env.unpack] = true
     knownCFunctions[env.getfenv] = true
+    knownCFunctions[env.debug.info] = true
+    knownCFunctions[env.debug.traceback] = true
+    knownCFunctions[env.debug.getinfo] = true
     knownCFunctions[env.setfenv] = true
     knownCFunctions[env.loadstring] = true
     knownCFunctions[env.load] = true
@@ -5582,8 +5647,7 @@ local function createEnv()
     env.getconnections = function() return {} end
     env.getsenv = function() return env end
     env.setthreadidentity = function(id) if id < 0 then error("invalid identity", 2) end end
-    env.getthreadidentity = function() return 2 end
-    env.getidentity = function() return 2 end
+    env.getidentity = function() return 7 end
     env.setidentity = function(id) if id < 0 then error("invalid identity", 2) end end
     env.fireclickdetector = function() end
     env.fireproximityprompt = function() end
@@ -5594,10 +5658,6 @@ local function createEnv()
     env.getnamecallmethod = function() return "" end
     env.setnamecallmethod = function() end
     env.setrawmetatable = function(t, mt) return setmetatable(t, mt) end
-    env.isreadonly = function(t)
-        if type(t) ~= "table" then return false end
-        return readonlyTables[t] == true or frozenTables[t] == true
-    end
     env.setreadonly = function(t, flag)
         if type(t) ~= "table" then return end
         if flag == false or flag == nil then
