@@ -19,10 +19,20 @@ API_DUMP = os.path.join(SCRIPT_DIR, "stuff", "API-Dump.json")
 LUNE_BIN = os.getenv("LUNE_BIN", "lune")
 TIMEOUT_SECONDS = 30
 
+NO_MENTIONS = discord.AllowedMentions.none()
+
+def sanitize_output(text: str) -> str:
+    text = text.replace("@everyone", "@\u200beveryone")
+    text = text.replace("@here", "@\u200bhere")
+    text = re.sub(r'<@&(\d+)>', r'<@&\u200b\1>', text)
+    text = re.sub(r'<@!?(\d+)>', r'<@\u200b\1>', text)
+    text = re.sub(r'<#(\d+)>', r'<#\u200b\1>', text)
+    return text
+
 intents = discord.Intents.default()
 intents.message_content = True
 
-bot = commands.Bot(command_prefix=".", intents=intents, help_command=None)
+bot = commands.Bot(command_prefix=".", intents=intents, help_command=None, allowed_mentions=discord.AllowedMentions.none())
 
 URL_PATTERN = re.compile(r'https?://\S+')
 
@@ -128,7 +138,8 @@ async def analyze(ctx: commands.Context, *, text: str = ""):
     if not code or not code.strip():
         await ctx.reply(
             "Attach a .lua/.luau file, reply to a message that has one, "
-            "put the code in a ```lua ... ``` code block, or provide a valid code link."
+            "put the code in a ```lua ... ``` code block, or provide a valid code link.",
+            allowed_mentions=NO_MENTIONS
         )
         return
 
@@ -136,15 +147,17 @@ async def analyze(ctx: commands.Context, *, text: str = ""):
         loop = asyncio.get_running_loop()
         ok, result = await loop.run_in_executor(None, run_lune, code)
 
+    result = sanitize_output(result)
+
     if not ok:
-        await ctx.reply(f"Error:\n```\n{result}\n```")
+        await ctx.reply(f"Error:\n```\n{result}\n```", allowed_mentions=NO_MENTIONS)
         return
 
     if len(result) > 1900:
         file = discord.File(io.BytesIO(result.encode("utf-8")), filename="result.lua")
-        await ctx.reply("done, attached file:", file=file)
+        await ctx.reply("done, attached file:", file=file, allowed_mentions=NO_MENTIONS)
     else:
-        await ctx.reply(f"Result:\n```lua\n{result}\n```")
+        await ctx.reply(f"Result:\n```lua\n{result}\n```", allowed_mentions=NO_MENTIONS)
 
 
 @bot.event
