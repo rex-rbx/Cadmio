@@ -178,7 +178,6 @@ end
 
 local enumsData = {}
 local function loadEnums()
-    -- 1. Explicit path via Settings.enums (passed as `enums=/path/to/enums.json`)
     if type(Settings.enums) == "string" and Settings.enums ~= "" then
         local ok, raw = pcall(fs.readFile, Settings.enums)
         if ok and raw then
@@ -189,7 +188,6 @@ local function loadEnums()
             end
         end
     end
-    -- 2. Env var CADMIO_ENUMS
     if type(process.env.CADMIO_ENUMS) == "string" and process.env.CADMIO_ENUMS ~= "" then
         local ok, raw = pcall(fs.readFile, process.env.CADMIO_ENUMS)
         if ok and raw then
@@ -200,11 +198,9 @@ local function loadEnums()
             end
         end
     end
-    -- 3. SCRIPT_DIR/stuff/enums.json
     local enumPath = SCRIPT_DIR and (SCRIPT_DIR .. "stuff/enums.json") or "stuff/enums.json"
     local raw, ok
     ok, raw = pcall(fs.readFile, enumPath)
-    -- 4. Same dir as resolved API dump
     if not ok or not raw then
         local resolved = resolveApiDumpPath()
         if resolved then
@@ -223,7 +219,6 @@ pcall(loadEnums)
 
 local classesData = {}
 local function loadClasses()
-    -- 1. Explicit path via Settings.classes
     if type(Settings.classes) == "string" and Settings.classes ~= "" then
         local ok, raw = pcall(fs.readFile, Settings.classes)
         if ok and raw then
@@ -234,7 +229,6 @@ local function loadClasses()
             end
         end
     end
-    -- 2. Env var CADMIO_CLASSES
     if type(process.env.CADMIO_CLASSES) == "string" and process.env.CADMIO_CLASSES ~= "" then
         local ok, raw = pcall(fs.readFile, process.env.CADMIO_CLASSES)
         if ok and raw then
@@ -245,11 +239,9 @@ local function loadClasses()
             end
         end
     end
-    -- 3. SCRIPT_DIR/stuff/classes.json
     local classPath = SCRIPT_DIR and (SCRIPT_DIR .. "stuff/classes.json") or "stuff/classes.json"
     local raw, ok
     ok, raw = pcall(fs.readFile, classPath)
-    -- 4. Same dir as resolved API dump
     if not ok or not raw then
         local resolved = resolveApiDumpPath()
         if resolved then
@@ -268,7 +260,6 @@ pcall(loadClasses)
 
 local assetIdsData = {}
 local function loadAssetIds()
-    -- 1. Explicit path via Settings.assetids
     if type(Settings.assetids) == "string" and Settings.assetids ~= "" then
         local ok, raw = pcall(fs.readFile, Settings.assetids)
         if ok and raw then
@@ -279,7 +270,6 @@ local function loadAssetIds()
             end
         end
     end
-    -- 2. Env var CADMIO_ASSETIDS
     if type(process.env.CADMIO_ASSETIDS) == "string" and process.env.CADMIO_ASSETIDS ~= "" then
         local ok, raw = pcall(fs.readFile, process.env.CADMIO_ASSETIDS)
         if ok and raw then
@@ -290,11 +280,9 @@ local function loadAssetIds()
             end
         end
     end
-    -- 3. SCRIPT_DIR/stuff/assetids.json
     local assetPath = SCRIPT_DIR and (SCRIPT_DIR .. "stuff/assetids.json") or "stuff/assetids.json"
     local raw, ok
     ok, raw = pcall(fs.readFile, assetPath)
-    -- 4. Same dir as resolved API dump
     if not ok or not raw then
         local resolved = resolveApiDumpPath()
         if resolved then
@@ -2412,7 +2400,6 @@ makeProxy = function(name: string): any
                 svcMt._className = ks
                 svcMt._storedValues["ClassName"] = ks
                 svcMt._setKeys["ClassName"] = true
-                -- Chat service parent is "ugc" (DTC4 check)
                 if ks == "Chat" then
                     local ugcParent = makeProxy("ugc")
                     local ugcMt = getmetatable(ugcParent)
@@ -2454,8 +2441,6 @@ makeProxy = function(name: string): any
             return mt._className
         end
         local memberInfo = resolveApiMember(mt._className or "", ks)
-        -- RBXScriptSignal has inherent methods Connect/Wait/Once/Disconnect that
-        -- aren't in the API dump as class members
         if mt._className == "RBXScriptSignal" and (ks == "Connect" or ks == "connect" or ks == "Wait" or ks == "wait" or ks == "Once" or ks == "Disconnect" or ks == "disconnect") then
             if not children[ks] then
                 local parentRef = t
@@ -2469,9 +2454,6 @@ makeProxy = function(name: string): any
             end
             return children[ks]
         end
-        -- Check events BEFORE functions, because isScriptableFunctionMember
-        -- returns true for events too (events are technically callable as Connect).
-        -- But we want events to return signal proxies, not function wrappers.
         if isEventMember(memberInfo) then
             if not children[ks] then
                 local child = makeProxy(name .. "." .. ks)
@@ -2759,7 +2741,6 @@ makeProxy = function(name: string): any
             return u
         end
 
-        -- Look up in parentChildMap for actual child instances
         do
             local parentNameStr = mt._name or name
             if parentChildMap[parentNameStr] then
@@ -2770,8 +2751,6 @@ makeProxy = function(name: string): any
             end
         end
 
-        -- Roblox behavior: accessing a non-existent member on an Instance throws
-        -- an error like "X is not a valid member of ClassName \"Name\""
         local clsName = mt._className or "Instance"
         local instDisplayName = storedValues["Name"] or name or clsName
         local errMessage = ks .. " is not a valid member of " .. clsName .. " \"" .. tostring(instDisplayName) .. "\""
@@ -2980,7 +2959,6 @@ makeProxy = function(name: string): any
             serviceMt._className = serviceName
             serviceMt._storedValues["ClassName"] = serviceName
             serviceMt._setKeys["ClassName"] = true
-            -- Chat service parent is "ugc" (Roblox quirk exposed by DTC4 check)
             if serviceName == "Chat" then
                 local ugcParent = makeProxy("ugc")
                 local ugcMt = getmetatable(ugcParent)
@@ -3208,8 +3186,6 @@ makeProxy = function(name: string): any
                 pm._storedValues["Parent"] = nil
                 pm._setKeys["Parent"] = true
             end
-            -- In Roblox, Destroy also nils out Parent of all descendants.
-            -- Find children of this instance (via parentChildMap) and nil their Parent.
             local children = parentChildMap[parentName]
             if children then
                 for childName, childProxy in pairs(children) do
@@ -3218,7 +3194,6 @@ makeProxy = function(name: string): any
                         childMt._storedValues["Parent"] = nil
                         childMt._setKeys["Parent"] = true
                     end
-                    -- Recurse into the child's children too (Destroy is recursive)
                     local grandChildren = parentChildMap[childName]
                     if grandChildren then
                         for _, grandChildProxy in pairs(grandChildren) do
@@ -3230,7 +3205,6 @@ makeProxy = function(name: string): any
                         end
                     end
                 end
-                -- Clear the parentChildMap entry
                 parentChildMap[parentName] = nil
             end
             return makeProxy(retName)
@@ -3431,8 +3405,6 @@ makeProxy = function(name: string): any
             emit(string.format('local %s = %s:GenerateGUID(%s)', retName, parentName, table.concat(parts, ", ")))
             local guidCounter = (_G._guidCounter or 0) + 1
             _G._guidCounter = guidCounter
-            -- GenerateGUID(wrapInCurlyBraces: boolean = true)
-            -- Default is true (with braces). If first arg is explicitly false, omit braces.
             local wrap = true
             if args[startIdx] == false then wrap = false end
             local guidStr = string.format("%08x-%04x-%04x-%04x-%012x", guidCounter, guidCounter, guidCounter, guidCounter, guidCounter)
@@ -3770,18 +3742,15 @@ makeProxy = function(name: string): any
             emit(string.format('%s:GetChildren()', parentName))
             local parentMt = getmetatable(parent)
             local parentCls = parentMt and parentMt._className or ""
-            -- For game (DataModel), return the cached services plus common defaults
             if parentCls == "DataModel" then
                 local result = {}
                 local seen = {}
-                -- Collect already-cached services
                 for svcName, svcProxy in pairs(serviceCache) do
                     if not seen[svcProxy] then
                         seen[svcProxy] = true
                         table.insert(result, svcProxy)
                     end
                 end
-                -- Ensure a minimum set of common services exist
                 local COMMON_SERVICES = {
                     "Workspace", "Players", "ReplicatedStorage", "ReplicatedFirst",
                     "ServerScriptService", "ServerStorage", "StarterGui", "StarterPack",
@@ -3797,7 +3766,6 @@ makeProxy = function(name: string): any
                         svcMt._setKeys["ClassName"] = true
                         svcMt._storedValues["Name"] = svcName
                         svcMt._setKeys["Name"] = true
-                        -- Chat parent is "ugc" (DTC4 check)
                         if svcName == "Chat" then
                             local ugcParent = makeProxy("ugc")
                             local ugcMt = getmetatable(ugcParent)
@@ -3818,7 +3786,6 @@ makeProxy = function(name: string): any
                 end
                 return result
             end
-            -- For workspace, return its known children
             if parentCls == "Workspace" then
                 local children = parentChildMap[parentName] or {}
                 local result = {}
@@ -3827,7 +3794,6 @@ makeProxy = function(name: string): any
                 end
                 return result
             end
-            -- For other instances, look up known children
             local children = parentChildMap[parentName] or {}
             local result = {}
             for _, child in pairs(children) do
@@ -3839,11 +3805,6 @@ makeProxy = function(name: string): any
         if isMethod and fieldName == "GetFullName" and parent then
             local parentName = proxyName(parent)
             emit(string.format('%s:GetFullName()', parentName))
-            -- Roblox semantics:
-            --   game:GetFullName() returns "game"
-            --   workspace:GetFullName() returns "Workspace" (game is NOT a prefix)
-            --   game.Players:GetFullName() returns "Players"
-            -- So game is excluded as a prefix; only included if it's the target itself.
             local parts = {}
             local cur = parent
             local seen = {}
@@ -3853,14 +3814,12 @@ makeProxy = function(name: string): any
                 local curMt = getmetatable(cur)
                 if not curMt then break end
                 local isGame = curMt._className == "DataModel"
-                -- For game itself (the target), return its name directly
                 if isGame and #parts == 0 then
                     isTargetGame = true
                     local curName = (curMt._storedValues and curMt._storedValues["Name"]) or "game"
                     table.insert(parts, 1, tostring(curName))
                     break
                 end
-                -- Skip game when it's an ancestor (don't include in path)
                 if isGame then break end
                 local curName = (curMt._storedValues and curMt._storedValues["Name"])
                 if not curName or curName == "" then
@@ -3884,11 +3843,9 @@ makeProxy = function(name: string): any
         if isMethod and fieldName == "GetPlayers" and parent then
             local parentName = proxyName(parent)
             emit(string.format('%s:GetPlayers()', parentName))
-            -- Return at least the LocalPlayer so the count is > 0
             local parentMt = getmetatable(parent)
             if parentMt and parentMt._className == "Players" then
                 local players = {}
-                -- Use the LocalPlayer accessor (creates it if not yet created)
                 local lp = parent.LocalPlayer
                 if lp then
                     table.insert(players, lp)
@@ -4161,7 +4118,6 @@ spyInstance = function(className: string, name: string?, silent: boolean?): any
     mt._className = className
     mt._storedValues["ClassName"] = className
     mt._setKeys["ClassName"] = true
-    -- Services have Name = ClassName by default (matches Roblox behavior)
     mt._storedValues["Name"] = className
     mt._setKeys["Name"] = true
     applyClassDefaults(proxy, className)
@@ -4494,8 +4450,6 @@ local function createEnv()
     }, {
         __index = function(_, k)
             if k == "getinfo" then
-                -- debug.getinfo returns a TABLE with named fields (unlike debug.info
-                -- which returns multiple values). This matches Roblox behavior.
                 return function(f, what)
                     what = what or "fl"
                     if type(f) == "function" then
@@ -4552,7 +4506,6 @@ local function createEnv()
                         }
                     end
                     if type(f) == "number" then
-                        -- Level-based: build a table by querying each field
                         local info = {}
                         local function query(ch)
                             local ok, val = pcall(_realDebugInfo, f, ch)
@@ -5054,7 +5007,6 @@ local function createEnv()
 
     local DATA_TYPES = { Vector3 = true, Vector2 = true, UDim2 = true, UDim = true, CFrame = true }
     local function newCtor(name)
-        -- For UDim2, also expose fromScale / fromOffset as callable constructors
         local extraCtors
         if name == "UDim2" then
             extraCtors = {
@@ -5344,9 +5296,6 @@ local function createEnv()
         wait = function(time)
             yieldTick(); tick()
             local t = tonumber(time) or 0.015
-            -- Use real Lune task.wait for realistic timing behavior.
-            -- This actually yields the thread for approximately t seconds,
-            -- with the small scheduling jitter that Roblox's task.wait has.
             local actualT = realTaskWait(t)
             return t, 1
         end,
