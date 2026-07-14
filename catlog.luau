@@ -6331,7 +6331,7 @@ local function createEnv()
     env.http = {request = env.http_request}
     env.setclipboard = function() end
     env.readfile = function() return "" end
-    env.writeStringToFile = function() end
+    env.writefile  = function() end
     env.isfile = function() return false end
     env.newcclosure = function(f)
         if type(f) ~= "function" then error("invalid argument #1 to 'newcclosure'", 2) end
@@ -6498,7 +6498,7 @@ local function createEnv()
         if p and _fileSystem[p] then return _fileSystem[p] end
         return nil
     end
-    env.writeStringToFile = function(path, content)
+    env.writefile = function(path, content)
         local p = _resolvePath(path)
         if p then _fileSystem[p] = tostring(content or "") end
     end
