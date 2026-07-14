@@ -5798,7 +5798,7 @@ local function createEnv()
     })
     env.Enums = env.Enum
 
-    local DATA_TYPES = { Vector3 = true, Vector2 = true, UDim2 = true, UDim = true, CFrame = true }
+    local DATA_TYPES = { Vector3 = true, Vector2 = true, Vector3int16 = true, Vector2int16 = true, UDim2 = true, UDim = true, CFrame = true }
     local function newCtor(name)
         local extraCtors
         if name == "UDim2" then
@@ -5848,6 +5848,13 @@ local function createEnv()
                 },
                 Vector2 = {
                     zero = {0, 0}, one = {1, 1},
+                },
+                Vector2int16 = {
+                    zero = {0, 0}, one = {1, 1},
+                },
+                Vector3int16 = {
+                    zero = {0, 0, 0}, one = {1, 1, 1},
+                    xAxis = {1, 0, 0}, yAxis = {0, 1, 0}, zAxis = {0, 0, 1},
                 },
                 UDim2 = {
                     zero = {0, 0, 0, 0}, one = {1, 1, 1, 1},
