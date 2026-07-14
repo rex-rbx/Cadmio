@@ -14,14 +14,14 @@ import aiohttp
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-LUNE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catlog.luau")
+LUTE_SCRIPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "catlog.luau")
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 STUFF_DIR = os.path.join(SCRIPT_DIR, "stuff")
 API_DUMP = os.path.join(STUFF_DIR, "API-Dump.json")
 CLASSES_JSON = os.path.join(STUFF_DIR, "classes.json")
 ENUMS_JSON = os.path.join(STUFF_DIR, "enums.json")
 ASSETIDS_JSON = os.path.join(STUFF_DIR, "assetids.json")
-LUNE_BIN = os.getenv("LUNE_BIN", "lune")
+LUTE_BIN = os.getenv("LUTE_BIN", "lute")
 TIMEOUT_SECONDS = 30
 
 NO_MENTIONS = discord.AllowedMentions.none()
@@ -95,7 +95,7 @@ async def extract_code(ctx: commands.Context, content: str) -> str | None:
     return None
 
 
-def run_lune(code: str) -> tuple[bool, str]:
+def run_lute(code: str) -> tuple[bool, str]:
     with tempfile.TemporaryDirectory() as tmp:
         input_path = os.path.join(tmp, "input.lua")
         output_path = os.path.join(tmp, "out.lua")
@@ -104,9 +104,9 @@ def run_lune(code: str) -> tuple[bool, str]:
             f.write(code)
 
         cmd = [
-            LUNE_BIN,
+            LUTE_BIN,
             "run",
-            LUNE_SCRIPT,
+            LUTE_SCRIPT,
             "--",
             input_path,
             f"out={output_path}",
@@ -133,7 +133,7 @@ def run_lune(code: str) -> tuple[bool, str]:
                 cwd=tmp,
             )
         except FileNotFoundError:
-            return False, "Could not find the lune executable. Set LUNE_BIN in your .env."
+            return False, "Could not find the lute executable. Set LUTE_BIN in your .env."
         except subprocess.TimeoutExpired:
             return False, "exceeded the time limit."
 
@@ -162,7 +162,7 @@ async def analyze(ctx: commands.Context, *, text: str = ""):
 
     async with ctx.typing():
         loop = asyncio.get_running_loop()
-        ok, result = await loop.run_in_executor(None, run_lune, code)
+        ok, result = await loop.run_in_executor(None, run_lute, code)
 
     result = sanitize_output(result)
 
