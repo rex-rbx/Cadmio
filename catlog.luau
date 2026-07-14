@@ -1,12 +1,10 @@
 -- main envlogger
-local fs = require("@lune/fs")
-local process = require("@lune/process")
-local stdio = require("@lune/stdio")
-local task = require("@lune/task")
-local serde = require("@lune/serde")
-local roblox = require("@lune/roblox")
-local luau = require("@lune/luau")
-local net = require("@lune/net")
+local JSON = require("@std/json")
+local fs = require("@std/fs")
+local process = require("@lute/process")
+local task = require("@std/task")
+local luau = require("@std/luau")
+local net = require("@lute/net/client")
 
 local Settings = {
     out = "out.lua",
@@ -55,27 +53,27 @@ local SCRIPT_DIR = getScriptDir()
 
 local function resolveApiDumpPath(): string?
     if type(Settings.api_dump) == "string" and Settings.api_dump ~= "" then
-        local ok = pcall(fs.readFile, Settings.api_dump)
+        local ok = pcall(fs.readFileToString, Settings.api_dump)
         if ok then return Settings.api_dump end
     end
     if type(process.env.CADMIO_API_DUMP) == "string" and process.env.CADMIO_API_DUMP ~= "" then
-        local ok = pcall(fs.readFile, process.env.CADMIO_API_DUMP)
+        local ok = pcall(fs.readFileToString, process.env.CADMIO_API_DUMP)
         if ok then return process.env.CADMIO_API_DUMP end
     end
     do
-        local ok = pcall(fs.readFile, API_DUMP_PATH)
+        local ok = pcall(fs.readFileToString, API_DUMP_PATH)
         if ok then return API_DUMP_PATH end
     end
     if SCRIPT_DIR then
         local candidate = SCRIPT_DIR .. API_DUMP_PATH
-        local ok = pcall(fs.readFile, candidate)
+        local ok = pcall(fs.readFileToString, candidate)
         if ok then return candidate end
     end
     local cwd = process.cwd or ""
     for _ = 1, 6 do
         if cwd == "" then break end
         local candidate = cwd .. "/" .. API_DUMP_PATH
-        local ok = pcall(fs.readFile, candidate)
+        local ok = pcall(fs.readFileToString, candidate)
         if ok then return candidate end
         local parent = cwd:match("(.*)/[^/]*")
         if not parent or parent == cwd then break end
@@ -138,8 +136,8 @@ local function loadApiDump()
             0
         )
     end
-    local raw = fs.readFile(RESOLVED_API_DUMP_PATH)
-    local decoded = serde.decode("json", raw)
+    local raw = fs.readFileToString(RESOLVED_API_DUMP_PATH)
+    local decoded = JSON.deserialize(raw)
 
     for _, classEntry in ipairs(decoded.Classes or {}) do
         if type(classEntry.Name) == "string" and classEntry.Name ~= "" then
@@ -180,9 +178,9 @@ end
 local enumsData = {}
 local function loadEnums()
     if type(Settings.enums) == "string" and Settings.enums ~= "" then
-        local ok, raw = pcall(fs.readFile, Settings.enums)
+        local ok, raw = pcall(fs.readFileToString, Settings.enums)
         if ok and raw then
-            local decoded = serde.decode("json", raw)
+            local decoded = JSON.deserialize(raw)
             if type(decoded) == "table" then
                 enumsData = decoded
                 return
@@ -190,9 +188,9 @@ local function loadEnums()
         end
     end
     if type(process.env.CADMIO_ENUMS) == "string" and process.env.CADMIO_ENUMS ~= "" then
-        local ok, raw = pcall(fs.readFile, process.env.CADMIO_ENUMS)
+        local ok, raw = pcall(fs.readFileToString, process.env.CADMIO_ENUMS)
         if ok and raw then
-            local decoded = serde.decode("json", raw)
+            local decoded = JSON.deserialize(raw)
             if type(decoded) == "table" then
                 enumsData = decoded
                 return
@@ -201,16 +199,16 @@ local function loadEnums()
     end
     local enumPath = SCRIPT_DIR and (SCRIPT_DIR .. "stuff/enums.json") or "stuff/enums.json"
     local raw, ok
-    ok, raw = pcall(fs.readFile, enumPath)
+    ok, raw = pcall(fs.readFileToString, enumPath)
     if not ok or not raw then
         local resolved = resolveApiDumpPath()
         if resolved then
             local altPath = resolved:gsub("API%-Dump%.json$", "enums.json")
-            ok, raw = pcall(fs.readFile, altPath)
+            ok, raw = pcall(fs.readFileToString, altPath)
         end
     end
     if ok and raw then
-        local decoded = serde.decode("json", raw)
+        local decoded = JSON.deserialize(raw)
         if type(decoded) == "table" then
             enumsData = decoded
         end
@@ -221,9 +219,9 @@ pcall(loadEnums)
 local classesData = {}
 local function loadClasses()
     if type(Settings.classes) == "string" and Settings.classes ~= "" then
-        local ok, raw = pcall(fs.readFile, Settings.classes)
+        local ok, raw = pcall(fs.readFileToString, Settings.classes)
         if ok and raw then
-            local decoded = serde.decode("json", raw)
+            local decoded = JSON.deserialize(raw)
             if type(decoded) == "table" then
                 classesData = decoded
                 return
@@ -231,9 +229,9 @@ local function loadClasses()
         end
     end
     if type(process.env.CADMIO_CLASSES) == "string" and process.env.CADMIO_CLASSES ~= "" then
-        local ok, raw = pcall(fs.readFile, process.env.CADMIO_CLASSES)
+        local ok, raw = pcall(fs.readFileToString, process.env.CADMIO_CLASSES)
         if ok and raw then
-            local decoded = serde.decode("json", raw)
+            local decoded = JSON.deserialize(raw)
             if type(decoded) == "table" then
                 classesData = decoded
                 return
@@ -242,16 +240,16 @@ local function loadClasses()
     end
     local classPath = SCRIPT_DIR and (SCRIPT_DIR .. "stuff/classes.json") or "stuff/classes.json"
     local raw, ok
-    ok, raw = pcall(fs.readFile, classPath)
+    ok, raw = pcall(fs.readFileToString, classPath)
     if not ok or not raw then
         local resolved = resolveApiDumpPath()
         if resolved then
             local altPath = resolved:gsub("API%-Dump%.json$", "classes.json")
-            ok, raw = pcall(fs.readFile, altPath)
+            ok, raw = pcall(fs.readFileToString, altPath)
         end
     end
     if ok and raw then
-        local decoded = serde.decode("json", raw)
+        local decoded = JSON.deserialize(raw)
         if type(decoded) == "table" then
             classesData = decoded
         end
@@ -262,9 +260,9 @@ pcall(loadClasses)
 local assetIdsData = {}
 local function loadAssetIds()
     if type(Settings.assetids) == "string" and Settings.assetids ~= "" then
-        local ok, raw = pcall(fs.readFile, Settings.assetids)
+        local ok, raw = pcall(fs.readFileToString, Settings.assetids)
         if ok and raw then
-            local decoded = serde.decode("json", raw)
+            local decoded = JSON.deserialize(raw)
             if type(decoded) == "table" then
                 assetIdsData = decoded
                 return
@@ -272,9 +270,9 @@ local function loadAssetIds()
         end
     end
     if type(process.env.CADMIO_ASSETIDS) == "string" and process.env.CADMIO_ASSETIDS ~= "" then
-        local ok, raw = pcall(fs.readFile, process.env.CADMIO_ASSETIDS)
+        local ok, raw = pcall(fs.readFileToString, process.env.CADMIO_ASSETIDS)
         if ok and raw then
-            local decoded = serde.decode("json", raw)
+            local decoded = JSON.deserialize(raw)
             if type(decoded) == "table" then
                 assetIdsData = decoded
                 return
@@ -283,16 +281,16 @@ local function loadAssetIds()
     end
     local assetPath = SCRIPT_DIR and (SCRIPT_DIR .. "stuff/assetids.json") or "stuff/assetids.json"
     local raw, ok
-    ok, raw = pcall(fs.readFile, assetPath)
+    ok, raw = pcall(fs.readFileToString, assetPath)
     if not ok or not raw then
         local resolved = resolveApiDumpPath()
         if resolved then
             local altPath = resolved:gsub("API%-Dump%.json$", "assetids.json")
-            ok, raw = pcall(fs.readFile, altPath)
+            ok, raw = pcall(fs.readFileToString, altPath)
         end
     end
     if ok and raw then
-        local decoded = serde.decode("json", raw)
+        local decoded = JSON.deserialize(raw)
         if type(decoded) == "table" then
             assetIdsData = decoded
         end
@@ -442,20 +440,6 @@ end
 
 local makeProxy: (string) -> any
 
-local _game = game
-if _game == nil and roblox ~= nil then
-    local ok, resolved = pcall(function() return (roblox).game end)
-    if ok then _game = resolved end
-end
-
-if _game ~= nil then
-    local oldGetService = _game.GetService
-
-    _game.GetService = function(self, serviceName)
-        return oldGetService(self, serviceName)
-    end
-end
-
 local lines = {}
 local varCount = 0
 local usedVars = {}
@@ -473,7 +457,7 @@ local function flushPartial()
         if Settings.ipt then
             env_line = "-- input: " .. tostring(Settings.ipt) .. "\n"
         end
-        fs.writeFile(PARTIAL_DUMP_PATH, env_line .. table.concat(lines, "\n"))
+        fs.writeStringToFile(PARTIAL_DUMP_PATH, env_line .. table.concat(lines, "\n"))
     end)
 end
 
@@ -923,328 +907,328 @@ local function fireAllConnectionsForEvent(proxyNameStr: string, eventName: strin
 end
 
 local numericPseudoProps = {
-    AccelerationLean, AccelerationTime, AirDensity, AirTurbulenceIntensity, Angle,
-    AngleSnapIncrement, AngularDamping, AngularResponsiveness, AngularRestitution,
-    AngularSpeed, AngularStrength, AngularVelocity, AnimationIdForRestPose, AspectRatio,
-    AssetId, Attack, AutoFRMLevel, BackgroundTransparency, BalanceMaxTorque, BalanceSpeed,
-    BaseAngle, BaseMoveSpeed, BaseTextureId, BaseTurnSpeed, BlastPressure, BlastRadius,
-    BodyTypeScale, BorderSizePixel, Brightness, BubbleDuration, BubblesSpacing,
-    BuildDebouncePeriod, CameraMaxZoomDistance, CameraMinZoomDistance, CameraMouseMultiplier,
-    CameraOrbitSensitivity, CameraPanSensitivity, CameraShiftFactor, CameraZoomSpeed,
-    CartoonFactor, Channel, CharacterAppearanceId, CharacterJumpHeight, CharacterJumpPower,
-    CharacterMaxSlopeAngle, CharacterWalkSpeed, ChestSize, ChinRaiser, ChinRaiserUpperLip,
-    ClimbAnimation, ClockTime, Coils, CommandBarHistoryLen, ComparisonDiffThreshold,
-    ComparisonPsnrThreshold, Contrast, ConversationDistance, Corrugator, Cover, CurrentAngle,
-    CursorPosition, CurveSize0, CurveSize1, CustomBackAccessoryId, CustomBodyBundleId,
-    CustomClassicPantsAccessoryId, CustomClassicShirtsAccessoryId,
-    CustomClassicTShirtsAccessoryId, CustomClimbAnimationId, CustomDressSkirtAccessoryId,
-    CustomEyebrowId, CustomEyelashId, CustomFaceAccessoryId, CustomFaceId,
-    CustomFallAnimationId, CustomFrontAccessoryId, CustomHairAccessoryId,
-    CustomHeadAccessoryId, CustomHeadId, CustomIdleAlt1AnimationId, CustomIdleAlt2AnimationId,
-    CustomIdleAnimationId, CustomJacketAccessoryId, CustomJumpAnimationId, CustomLeftArmId,
-    CustomLeftLegId, CustomLeftShoesAccessoryId, CustomMoodId, CustomNeckAccessoryId,
-    CustomPantsAccessoryId, CustomRightArmId, CustomRightLegId, CustomRightShoesAccessoryId,
-    CustomRunAnimationId, CustomShirtAccessoryId, CustomShortsAccessoryId,
-    CustomShoulderAccessoryId, CustomSweaterAccessoryId, CustomSwimAnimationId,
-    CustomSwimIdleAnimationId, CustomTShirtAccessoryId, CustomTorsoId, CustomWaistAccessoryId,
-    CustomWalkAnimationId, CycleOffset, D, Damping, DataComplexityLimit, DecayRatio,
-    DecayTime, DecelerationTime, Delay, DelayTime, Density, Depth, DepthScale, DesiredAngle,
-    DestroyJointRadiusPercent, DiagonalFieldOfView, Diffusion, DisplayOrder, DistanceFactor,
-    DistanceLowerLimit, DistanceStep, DistanceUpperLimit, DistributedGameTime, DopplerScale,
-    Drag, DragRotation, DraggerLengthFactor, DraggerMajorGridIncrement, DraggerMaxSoftSnaps,
-    DraggerScaleFactor, DraggerSoftSnapMarginFactor, DraggerSummonMarginFactor,
-    DraggerTiltRotateDuration, DryLevel, Duration, Duty, EarlyDelayTime, EmissiveStrength,
-    EmitterSize, EnvironmentDiffuseScale, EnvironmentSpecularScale, ExplorerImageIndex,
-    ExplorerOrder, ExposureCompensation, EyesLookDown, EyesLookLeft, EyesLookRight,
-    EyesLookUp, Face, FallAnimation, FallenPartsDestroyHeight, FarIntensity, Feedback,
-    FieldOfView, FillDirectionMaxCells, FillTransparency, FlatPucker, FlipbookSizeX,
-    FlipbookSizeY, FluidForceDrawScale, FocusDistance, FogEnd, FogStart, Force,
-    ForceDrawScale, ForceVisualizationSmoothingSteps, FrameId, FreeLength, Frequency,
-    Friction, FrictionWeight, Funneler, Gain, GainMakeup, GamepadCameraSensitivity,
-    GeographicLatitude, Glare, GraphicTShirt, GraphicsQualityLevel, Gravity, GroundOffset,
-    GroupTransparency, GrowRatio, Haze, Head, HeadBaseSize, HeadScale, Health,
-    HealthDisplayDistance, Heat, Height, HeightScale, HighCutFrequency, HighGain, HipHeight,
-    HipHeightScales, HoldDuration, HoverAnimateFrequency, HoverThickness, IdleAnimation,
-    ImageTransparency, InFocusRadius, InboundNetworkJitterMs, InboundNetworkLossPercent,
-    InboundNetworkMinDelayMs, InclinationAngle, IncomingReplicationLag, IndexSize,
-    InnerRadius, InputLatency, Intensity, InviteUser, JawDrop, JawLeft, JawRight,
-    JumpAnimation, JumpHeight, JumpPower, LODLevel, LadderSearchHeight, LadderSearchOffset,
-    LargeFileLineCountThreshold, LargeFileThreshold, LateDelayTime, LayoutOrder,
-    LeftAnkleSize, LeftArm, LeftBrowLowerer, LeftCheekPuff, LeftCheekRaiser, LeftClavicleSize,
-    LeftDimpler, LeftElbowSize, LeftEyeClosed, LeftEyeUpperLidRaiser, LeftHipSize,
-    LeftInnerBrowRaiser, LeftKneeSize, LeftLeg, LeftLipCornerDown, LeftLipCornerPuller,
-    LeftLipStretcher, LeftLowerLipDepressor, LeftNoseWrinkler, LeftOuterBrowRaiser,
-    LeftShoulderSize, LeftToeBaseSize, LeftUpperLipRaiser, LeftWristSize, Length, Level,
-    Lifetime, LightEmission, LightInfluence, LimitAngle0, LimitAngle1, LineHeight,
-    LineThickness, LineVelocity, LinearDamping, LinearResponsiveness, LinearSnapIncrement,
-    LinearStrength, LipPresser, LipsTogether, LowGain, LowShelfFrequency, LowShelfGain,
-    LowerAngle, LowerLimit, LowerLipSuck, Magnitude, MakeupGain, MasterVolume,
-    MasterVolumeStudio, MaxAcceleration, MaxActivationDistance, MaxAngle, MaxAngularVelocity,
-    MaxAxisDistance, MaxAxisFieldOfView, MaxBlurSize, MaxBubbles, MaxDistance, MaxDragAngle,
-    MaxDuration, MaxFindReplaceAllResults, MaxForce, MaxFrictionTorque, MaxHealth,
-    MaxIndicatorDistance, MaxIndicatorsVisible, MaxItems, MaxLength, MaxLevel, MaxPlayers,
-    MaxPromptsVisible, MaxRollAngleLeft, MaxRollAngleRight, MaxSlopeAngle, MaxSpeed,
-    MaxTextSize, MaxThrust, MaxTorque, MaxValue, MaxVelocity, MaxVisibleGraphemes,
-    MaximumSimulationRadius, MeshCacheSize, MeshId, MidGain, MiddleSize, MinDistance,
-    MinDragAngle, MinDuration, MinLength, MinTextSize, MinValue, MinimizeDistance, Mix,
-    MoodAnimation, MoonAngularSize, MotorMaxAcceleration, MotorMaxAngularAcceleration,
-    MotorMaxForce, MotorMaxTorque, MouseDeltaSensitivity, MouseSensitivity, MouthLeft,
-    MouthRight, MoveMaxForce, MoveSpeedFactor, NameDisplayDistance, NearIntensity, NearPlaneZ,
-    NeckSize, NumPlayers, NumberOfPlayers, Octave, Offset, OffsetStudsU, OffsetStudsV,
-    Opacity, Order, OutboundNetworkJitterMs, OutboundNetworkLossPercent,
-    OutboundNetworkMinDelayMs, OutlineTransparency, OverlayTextureId, P, Padding,
-    PaddingBottom, PaddingLeft, PaddingRight, PaddingTop, Pants, PartyVoiceVolume, PinkySize,
-    Pitch, PitchMaxTorque, PitchSpeedFactor, PixelsPerStud, PlaybackSpeed, PointerIndex, Port,
-    PreferredUploadId, PressedThreshold, PriorFrameInvoked, Priority, PromptHoldDuration,
-    PropertyOrder, ProportionScale, Pucker, Q, QualityLevel, RCCProfilerRecordFrameRate,
-    RCCProfilerRecordTimeFrame, Radius, RampTime, Range, Rate, Ratio, ReferenceFrequency,
-    Reflectance, Release, ReleasedThreshold, RenderingTestFrameCount, RespawnTime,
-    ResponseCurve, Responsiveness, Restitution, RightAnkleSize, RightArm, RightBrowLowerer,
-    RightCheekPuff, RightCheekRaiser, RightClavicleSize, RightDimpler, RightElbowSize,
-    RightEyeClosed, RightEyeUpperLidRaiser, RightHipSize, RightInnerBrowRaiser, RightKneeSize,
-    RightLeg, RightLipCornerDown, RightLipCornerPuller, RightLipStretcher,
-    RightLowerLipDepressor, RightNoseWrinkler, RightOuterBrowRaiser, RightShoulderSize,
-    RightToeBaseSize, RightUpperLipRaiser, RightWristSize, RingSize, RiseVelocity,
-    RollMaxTorque, RollOffMaxDistance, RollOffMinDistance, RollSpeedFactor, RolloffScale,
-    RootPriority, RootSize, Rotation, RunAnimation, Saturation, Scale, ScaleFactor,
-    ScriptTimeoutLength, ScrollBarImageTransparency, ScrollBarThickness, SearchDistance, Seed,
-    Segments, SelectedControlPoint, SelectionModeRotateSpeed, SelectionOrder, SelectionStart,
-    ServoMaxForce, ServoMaxTorque, ShadowSoftness, Shape, ShapePartial, Shirt, ShrinkRatio,
-    Sides, SimulateSecondsLag, SimulationRadius, Size, Skew, SliceScale, SmoothTime,
-    SmoothingAngle, Speed, SpineSize, Spread, SpringDamping, SpringStiffness, Square,
-    StandForce, StandSpeed, StarCount, Steer, SteerFloat, StepIdOffset, Stiffness,
-    StudsBetweenTextures, StudsPerTile, StudsPerTileU, StudsPerTileV, SunAngularSize,
-    SurfaceTransparency, SwimAnimation, TargetAngle, TargetPosition, TargetRadius,
-    Temperature, TextSize, TextStrokeTransparency, TextTransparency, TextureLength,
-    TextureSpeed, Thickness, Threshold, Throttle, ThrottleAdjustTime, ThrottleFloat, ThrustD,
-    ThrustP, ThrustSpeed, ThumbSize, Time, TimePosition, TimeScale, Timeout, TongueDown,
-    TongueOut, TongueUp, ToolPunchThroughDistance, TopP, Torque, TorqueDrawScale, Torso,
-    TrackballRadialPullFactor, TrackballRollFactor, Transparency, TriangleCount,
-    TriggerDistance, TurnD, TurnMaxTorque, TurnP, TurnSpeed, TurnSpeedFactor, TweenTime,
-    TwistLowerAngle, TwistUpperAngle, UIMaximum, UIMinimum, UINumTicks, UpperAngle,
-    UpperLimit, UpperLipSuck, UserId, VRRotationIntensity, Value, Velocity,
-    VelocityInheritance, VersionNumber, VersionedAssetId, VerticalStudsOffset,
-    VideoTransparency, VoiceChatVolume, Volume, WaistSize, WalkAnimation, WalkSpeed,
-    WalkSpeedScales, WaterReflectance, WaterTransparency, WaterWaveSize, WaterWaveSpeed,
-    Weight, WetLevel, Width, Width0, Width1, WidthScale, WinchForce, WinchResponsiveness,
-    WinchSpeed, WinchTarget, WireRadius, ZIndex, ZOffset,
+    "AccelerationLean", "AccelerationTime", "AirDensity", "AirTurbulenceIntensity", "Angle",
+    "AngleSnapIncrement", "AngularDamping", "AngularResponsiveness", "AngularRestitution",
+    "AngularSpeed", "AngularStrength", "AngularVelocity", "AnimationIdForRestPose", "AspectRatio",
+    "AssetId", "Attack", "AutoFRMLevel", "BackgroundTransparency", "BalanceMaxTorque", "BalanceSpeed",
+    "BaseAngle", "BaseMoveSpeed", "BaseTextureId", "BaseTurnSpeed", "BlastPressure", "BlastRadius",
+    "BodyTypeScale", "BorderSizePixel", "Brightness", "BubbleDuration", "BubblesSpacing",
+    "BuildDebouncePeriod", "CameraMaxZoomDistance", "CameraMinZoomDistance", "CameraMouseMultiplier",
+    "CameraOrbitSensitivity", "CameraPanSensitivity", "CameraShiftFactor", "CameraZoomSpeed",
+    "CartoonFactor", "Channel", "CharacterAppearanceId", "CharacterJumpHeight", "CharacterJumpPower",
+    "CharacterMaxSlopeAngle", "CharacterWalkSpeed", "ChestSize", "ChinRaiser", "ChinRaiserUpperLip",
+    "ClimbAnimation", "ClockTime", "Coils", "CommandBarHistoryLen", "ComparisonDiffThreshold",
+    "ComparisonPsnrThreshold", "Contrast", "ConversationDistance", "Corrugator", "Cover", "CurrentAngle",
+    "CursorPosition", "CurveSize0", "CurveSize1", "CustomBackAccessoryId", "CustomBodyBundleId",
+    "CustomClassicPantsAccessoryId", "CustomClassicShirtsAccessoryId",
+    "CustomClassicTShirtsAccessoryId", "CustomClimbAnimationId", "CustomDressSkirtAccessoryId",
+    "CustomEyebrowId", "CustomEyelashId", "CustomFaceAccessoryId", "CustomFaceId",
+    "CustomFallAnimationId", "CustomFrontAccessoryId", "CustomHairAccessoryId",
+    "CustomHeadAccessoryId", "CustomHeadId", "CustomIdleAlt1AnimationId", "CustomIdleAlt2AnimationId",
+    "CustomIdleAnimationId", "CustomJacketAccessoryId", "CustomJumpAnimationId", "CustomLeftArmId",
+    "CustomLeftLegId", "CustomLeftShoesAccessoryId", "CustomMoodId", "CustomNeckAccessoryId",
+    "CustomPantsAccessoryId", "CustomRightArmId", "CustomRightLegId", "CustomRightShoesAccessoryId",
+    "CustomRunAnimationId", "CustomShirtAccessoryId", "CustomShortsAccessoryId",
+    "CustomShoulderAccessoryId", "CustomSweaterAccessoryId", "CustomSwimAnimationId",
+    "CustomSwimIdleAnimationId", "CustomTShirtAccessoryId", "CustomTorsoId", "CustomWaistAccessoryId",
+    "CustomWalkAnimationId", "CycleOffset", "D", "Damping", "DataComplexityLimit", "DecayRatio",
+    "DecayTime", "DecelerationTime", "Delay", "DelayTime", "Density", "Depth", "DepthScale", "DesiredAngle",
+    "DestroyJointRadiusPercent", "DiagonalFieldOfView", "Diffusion", "DisplayOrder", "DistanceFactor",
+    "DistanceLowerLimit", "DistanceStep", "DistanceUpperLimit", "DistributedGameTime", "DopplerScale",
+    "Drag", "DragRotation", "DraggerLengthFactor", "DraggerMajorGridIncrement", "DraggerMaxSoftSnaps",
+    "DraggerScaleFactor", "DraggerSoftSnapMarginFactor", "DraggerSummonMarginFactor",
+    "DraggerTiltRotateDuration", "DryLevel", "Duration", "Duty", "EarlyDelayTime", "EmissiveStrength",
+    "EmitterSize", "EnvironmentDiffuseScale", "EnvironmentSpecularScale", "ExplorerImageIndex",
+    "ExplorerOrder", "ExposureCompensation", "EyesLookDown", "EyesLookLeft", "EyesLookRight",
+    "EyesLookUp", "Face", "FallAnimation", "FallenPartsDestroyHeight", "FarIntensity", "Feedback",
+    "FieldOfView", "FillDirectionMaxCells", "FillTransparency", "FlatPucker", "FlipbookSizeX",
+    "FlipbookSizeY", "FluidForceDrawScale", "FocusDistance", "FogEnd", "FogStart", "Force",
+    "ForceDrawScale", "ForceVisualizationSmoothingSteps", "FrameId", "FreeLength", "Frequency",
+    "Friction", "FrictionWeight", "Funneler", "Gain", "GainMakeup", "GamepadCameraSensitivity",
+    "GeographicLatitude", "Glare", "GraphicTShirt", "GraphicsQualityLevel", "Gravity", "GroundOffset",
+    "GroupTransparency", "GrowRatio", "Haze", "Head", "HeadBaseSize", "HeadScale", "Health",
+    "HealthDisplayDistance", "Heat", "Height", "HeightScale", "HighCutFrequency", "HighGain", "HipHeight",
+    "HipHeightScales", "HoldDuration", "HoverAnimateFrequency", "HoverThickness", "IdleAnimation",
+    "ImageTransparency", "InFocusRadius", "InboundNetworkJitterMs", "InboundNetworkLossPercent",
+    "InboundNetworkMinDelayMs", "InclinationAngle", "IncomingReplicationLag", "IndexSize",
+    "InnerRadius", "InputLatency", "Intensity", "InviteUser", "JawDrop", "JawLeft", "JawRight",
+    "JumpAnimation", "JumpHeight", "JumpPower", "LODLevel", "LadderSearchHeight", "LadderSearchOffset",
+    "LargeFileLineCountThreshold", "LargeFileThreshold", "LateDelayTime", "LayoutOrder",
+    "LeftAnkleSize", "LeftArm", "LeftBrowLowerer", "LeftCheekPuff", "LeftCheekRaiser", "LeftClavicleSize",
+    "LeftDimpler", "LeftElbowSize", "LeftEyeClosed", "LeftEyeUpperLidRaiser", "LeftHipSize",
+    "LeftInnerBrowRaiser", "LeftKneeSize", "LeftLeg", "LeftLipCornerDown", "LeftLipCornerPuller",
+    "LeftLipStretcher", "LeftLowerLipDepressor", "LeftNoseWrinkler", "LeftOuterBrowRaiser",
+    "LeftShoulderSize", "LeftToeBaseSize", "LeftUpperLipRaiser", "LeftWristSize", "Length", "Level",
+    "Lifetime", "LightEmission", "LightInfluence", "LimitAngle0", "LimitAngle1", "LineHeight",
+    "LineThickness", "LineVelocity", "LinearDamping", "LinearResponsiveness", "LinearSnapIncrement",
+    "LinearStrength", "LipPresser", "LipsTogether", "LowGain", "LowShelfFrequency", "LowShelfGain",
+    "LowerAngle", "LowerLimit", "LowerLipSuck", "Magnitude", "MakeupGain", "MasterVolume",
+    "MasterVolumeStudio", "MaxAcceleration", "MaxActivationDistance", "MaxAngle", "MaxAngularVelocity",
+    "MaxAxisDistance", "MaxAxisFieldOfView", "MaxBlurSize", "MaxBubbles", "MaxDistance", "MaxDragAngle",
+    "MaxDuration", "MaxFindReplaceAllResults", "MaxForce", "MaxFrictionTorque", "MaxHealth",
+    "MaxIndicatorDistance", "MaxIndicatorsVisible", "MaxItems", "MaxLength", "MaxLevel", "MaxPlayers",
+    "MaxPromptsVisible", "MaxRollAngleLeft", "MaxRollAngleRight", "MaxSlopeAngle", "MaxSpeed",
+    "MaxTextSize", "MaxThrust", "MaxTorque", "MaxValue", "MaxVelocity", "MaxVisibleGraphemes",
+    "MaximumSimulationRadius", "MeshCacheSize", "MeshId", "MidGain", "MiddleSize", "MinDistance",
+    "MinDragAngle", "MinDuration", "MinLength", "MinTextSize", "MinValue", "MinimizeDistance", "Mix",
+    "MoodAnimation", "MoonAngularSize", "MotorMaxAcceleration", "MotorMaxAngularAcceleration",
+    "MotorMaxForce", "MotorMaxTorque", "MouseDeltaSensitivity", "MouseSensitivity", "MouthLeft",
+    "MouthRight", "MoveMaxForce", "MoveSpeedFactor", "NameDisplayDistance", "NearIntensity", "NearPlaneZ",
+    "NeckSize", "NumPlayers", "NumberOfPlayers", "Octave", "Offset", "OffsetStudsU", "OffsetStudsV",
+    "Opacity", "Order", "OutboundNetworkJitterMs", "OutboundNetworkLossPercent",
+    "OutboundNetworkMinDelayMs", "OutlineTransparency", "OverlayTextureId", "P", "Padding",
+    "PaddingBottom", "PaddingLeft", "PaddingRight", "PaddingTop", "Pants", "PartyVoiceVolume", "PinkySize",
+    "Pitch", "PitchMaxTorque", "PitchSpeedFactor", "PixelsPerStud", "PlaybackSpeed", "PointerIndex", "Port",
+    "PreferredUploadId", "PressedThreshold", "PriorFrameInvoked", "Priority", "PromptHoldDuration",
+    "PropertyOrder", "ProportionScale", "Pucker", "Q", "QualityLevel", "RCCProfilerRecordFrameRate",
+    "RCCProfilerRecordTimeFrame", "Radius", "RampTime", "Range", "Rate", "Ratio", "ReferenceFrequency",
+    "Reflectance", "Release", "ReleasedThreshold", "RenderingTestFrameCount", "RespawnTime",
+    "ResponseCurve", "Responsiveness", "Restitution", "RightAnkleSize", "RightArm", "RightBrowLowerer",
+    "RightCheekPuff", "RightCheekRaiser", "RightClavicleSize", "RightDimpler", "RightElbowSize",
+    "RightEyeClosed", "RightEyeUpperLidRaiser", "RightHipSize", "RightInnerBrowRaiser", "RightKneeSize",
+    "RightLeg", "RightLipCornerDown", "RightLipCornerPuller", "RightLipStretcher",
+    "RightLowerLipDepressor", "RightNoseWrinkler", "RightOuterBrowRaiser", "RightShoulderSize",
+    "RightToeBaseSize", "RightUpperLipRaiser", "RightWristSize", "RingSize", "RiseVelocity",
+    "RollMaxTorque", "RollOffMaxDistance", "RollOffMinDistance", "RollSpeedFactor", "RolloffScale",
+    "RootPriority", "RootSize", "Rotation", "RunAnimation", "Saturation", "Scale", "ScaleFactor",
+    "ScriptTimeoutLength", "ScrollBarImageTransparency", "ScrollBarThickness", "SearchDistance", "Seed",
+    "Segments", "SelectedControlPoint", "SelectionModeRotateSpeed", "SelectionOrder", "SelectionStart",
+    "ServoMaxForce", "ServoMaxTorque", "ShadowSoftness", "Shape", "ShapePartial", "Shirt", "ShrinkRatio",
+    "Sides", "SimulateSecondsLag", "SimulationRadius", "Size", "Skew", "SliceScale", "SmoothTime",
+    "SmoothingAngle", "Speed", "SpineSize", "Spread", "SpringDamping", "SpringStiffness", "Square",
+    "StandForce", "StandSpeed", "StarCount", "Steer", "SteerFloat", "StepIdOffset", "Stiffness",
+    "StudsBetweenTextures", "StudsPerTile", "StudsPerTileU", "StudsPerTileV", "SunAngularSize",
+    "SurfaceTransparency", "SwimAnimation", "TargetAngle", "TargetPosition", "TargetRadius",
+    "Temperature", "TextSize", "TextStrokeTransparency", "TextTransparency", "TextureLength",
+    "TextureSpeed", "Thickness", "Threshold", "Throttle", "ThrottleAdjustTime", "ThrottleFloat", "ThrustD",
+    "ThrustP", "ThrustSpeed", "ThumbSize", "Time", "TimePosition", "TimeScale", "Timeout", "TongueDown",
+    "TongueOut", "TongueUp", "ToolPunchThroughDistance", "TopP", "Torque", "TorqueDrawScale", "Torso",
+    "TrackballRadialPullFactor", "TrackballRollFactor", "Transparency", "TriangleCount",
+    "TriggerDistance", "TurnD", "TurnMaxTorque", "TurnP", "TurnSpeed", "TurnSpeedFactor", "TweenTime",
+    "TwistLowerAngle", "TwistUpperAngle", "UIMaximum", "UIMinimum", "UINumTicks", "UpperAngle",
+    "UpperLimit", "UpperLipSuck", "UserId", "VRRotationIntensity", "Value", "Velocity",
+    "VelocityInheritance", "VersionNumber", "VersionedAssetId", "VerticalStudsOffset",
+    "VideoTransparency", "VoiceChatVolume", "Volume", "WaistSize", "WalkAnimation", "WalkSpeed",
+    "WalkSpeedScales", "WaterReflectance", "WaterTransparency", "WaterWaveSize", "WaterWaveSpeed",
+    "Weight", "WetLevel", "Width", "Width0", "Width1", "WidthScale", "WinchForce", "WinchResponsiveness",
+    "WinchSpeed", "WinchTarget", "WireRadius", "ZIndex", "ZOffset",
 }
 
 local positiveNumberProps = {
-    AccelerationTime, AirDensity, AirTurbulenceIntensity, Angle, AngleSnapIncrement,
-    AngularDamping, AngularResponsiveness, AngularRestitution, AngularSpeed, AspectRatio,
-    BalanceMaxTorque, BalanceSpeed, BaseAngle, BaseMoveSpeed, BaseTurnSpeed, BlastPressure,
-    BlastRadius, BodyTypeScale, BorderSizePixel, Brightness, CameraMaxZoomDistance,
-    CameraMinZoomDistance, CameraZoomSpeed, CharacterJumpHeight, CharacterJumpPower,
-    CharacterMaxSlopeAngle, CharacterWalkSpeed, ChestSize, ClockTime, ComparisonDiffThreshold,
-    ComparisonPsnrThreshold, ConversationDistance, CurrentAngle, CursorPosition, CurveSize0,
-    CurveSize1, CycleOffset, Damping, DataComplexityLimit, DecayRatio, DecayTime,
-    DecelerationTime, DelayTime, Density, Depth, DepthScale, DesiredAngle,
-    DestroyJointRadiusPercent, DiagonalFieldOfView, DistanceFactor, DistanceLowerLimit,
-    DistanceStep, DistanceUpperLimit, DistributedGameTime, DopplerScale, DraggerLengthFactor,
-    DraggerScaleFactor, EarlyDelayTime, EmitterSize, EnvironmentDiffuseScale,
-    EnvironmentSpecularScale, FallenPartsDestroyHeight, FarIntensity, FieldOfView,
-    FlipbookSizeX, FlipbookSizeY, FluidForceDrawScale, FocusDistance, FogEnd, FogStart, Force,
-    ForceDrawScale, ForceVisualizationSmoothingSteps, FreeLength, Frequency, Friction,
-    FrictionWeight, Glare, Gravity, GroundOffset, Haze, HeadBaseSize, HeadScale, Health,
-    HealthDisplayDistance, Height, HeightScale, HighCutFrequency, HipHeight, HipHeightScales,
-    HoverAnimateFrequency, HoverThickness, InFocusRadius, InclinationAngle, IndexSize,
-    InnerRadius, Intensity, JumpHeight, JumpPower, LadderSearchHeight, LadderSearchOffset,
-    LargeFileLineCountThreshold, LargeFileThreshold, LateDelayTime, LayoutOrder,
-    LeftAnkleSize, LeftClavicleSize, LeftElbowSize, LeftHipSize, LeftKneeSize,
-    LeftShoulderSize, LeftToeBaseSize, LeftWristSize, Length, Lifetime, LightEmission,
-    LightInfluence, LimitAngle0, LimitAngle1, LineHeight, LineThickness, LinearDamping,
-    LinearResponsiveness, LowShelfFrequency, LowerAngle, MasterVolume, MasterVolumeStudio,
-    MaxAcceleration, MaxActivationDistance, MaxAngle, MaxAxisDistance, MaxBlurSize,
-    MaxDistance, MaxDragAngle, MaxForce, MaxFrictionTorque, MaxHealth, MaxIndicatorDistance,
-    MaxIndicatorsVisible, MaxItems, MaxLength, MaxPlayers, MaxPromptsVisible,
-    MaxRollAngleLeft, MaxRollAngleRight, MaxSlopeAngle, MaxSpeed, MaxTextSize, MaxThrust,
-    MaxTorque, MaxVisibleGraphemes, MaximumSimulationRadius, MeshCacheSize, MiddleSize,
-    MinDistance, MinDragAngle, MinLength, MinTextSize, MinimizeDistance, MoonAngularSize,
-    MotorMaxForce, MotorMaxTorque, MoveMaxForce, MoveSpeedFactor, NameDisplayDistance,
-    NearIntensity, NearPlaneZ, NeckSize, NumPlayers, Offset, OffsetStudsU, OffsetStudsV,
-    Padding, PaddingBottom, PaddingLeft, PaddingRight, PaddingTop, PartyVoiceVolume,
-    PinkySize, PitchMaxTorque, PitchSpeedFactor, PixelsPerStud, PlaybackSpeed,
-    PressedThreshold, PromptHoldDuration, ProportionScale, RCCProfilerRecordFrameRate,
-    RCCProfilerRecordTimeFrame, Radius, RampTime, Range, Rate, ReferenceFrequency,
-    ReleasedThreshold, RenderingTestFrameCount, RespawnTime, Responsiveness, Restitution,
-    RightAnkleSize, RightClavicleSize, RightElbowSize, RightHipSize, RightKneeSize,
-    RightShoulderSize, RightToeBaseSize, RightWristSize, RingSize, RollMaxTorque,
-    RollOffMaxDistance, RollOffMinDistance, RollSpeedFactor, RolloffScale, RootSize, Scale,
-    ScaleFactor, ScriptTimeoutLength, ScrollBarThickness, SearchDistance,
-    SelectionModeRotateSpeed, ServoMaxForce, ServoMaxTorque, SimulationRadius, Size,
-    SliceScale, SmoothTime, SmoothingAngle, Speed, SpineSize, Spread, SpringDamping,
-    SpringStiffness, StandForce, StandSpeed, StarCount, StepIdOffset, Stiffness,
-    StudsPerTileU, StudsPerTileV, SunAngularSize, TargetAngle, TargetPosition, TargetRadius,
-    TextSize, TextureLength, TextureSpeed, Thickness, Threshold, ThrottleAdjustTime,
-    ThrustSpeed, ThumbSize, Time, TimePosition, TimeScale, Timeout, ToolPunchThroughDistance,
-    Torque, TorqueDrawScale, TriangleCount, TriggerDistance, TurnMaxTorque, TurnSpeed,
-    TurnSpeedFactor, TweenTime, TwistLowerAngle, TwistUpperAngle, UpperAngle,
-    VRRotationIntensity, VerticalStudsOffset, VoiceChatVolume, Volume, WaistSize, WalkSpeed,
-    WalkSpeedScales, WaterWaveSize, WaterWaveSpeed, Width, Width0, Width1, WidthScale,
-    WinchForce, WinchResponsiveness, WinchSpeed, WireRadius, ZIndex, ZOffset,
+    "AccelerationTime", "AirDensity", "AirTurbulenceIntensity", "Angle", "AngleSnapIncrement",
+    "AngularDamping", "AngularResponsiveness", "AngularRestitution", "AngularSpeed", "AspectRatio",
+    "BalanceMaxTorque", "BalanceSpeed", "BaseAngle", "BaseMoveSpeed", "BaseTurnSpeed", "BlastPressure",
+    "BlastRadius", "BodyTypeScale", "BorderSizePixel", "Brightness", "CameraMaxZoomDistance",
+    "CameraMinZoomDistance", "CameraZoomSpeed", "CharacterJumpHeight", "CharacterJumpPower",
+    "CharacterMaxSlopeAngle", "CharacterWalkSpeed", "ChestSize", "ClockTime", "ComparisonDiffThreshold",
+    "ComparisonPsnrThreshold", "ConversationDistance", "CurrentAngle", "CursorPosition", "CurveSize0",
+    "CurveSize1", "CycleOffset", "Damping", "DataComplexityLimit", "DecayRatio", "DecayTime",
+    "DecelerationTime", "DelayTime", "Density", "Depth", "DepthScale", "DesiredAngle",
+    "DestroyJointRadiusPercent", "DiagonalFieldOfView", "DistanceFactor", "DistanceLowerLimit",
+    "DistanceStep", "DistanceUpperLimit", "DistributedGameTime", "DopplerScale", "DraggerLengthFactor",
+    "DraggerScaleFactor", "EarlyDelayTime", "EmitterSize", "EnvironmentDiffuseScale",
+    "EnvironmentSpecularScale", "FallenPartsDestroyHeight", "FarIntensity", "FieldOfView",
+    "FlipbookSizeX", "FlipbookSizeY", "FluidForceDrawScale", "FocusDistance", "FogEnd", "FogStart", "Force",
+    "ForceDrawScale", "ForceVisualizationSmoothingSteps", "FreeLength", "Frequency", "Friction",
+    "FrictionWeight", "Glare", "Gravity", "GroundOffset", "Haze", "HeadBaseSize", "HeadScale", "Health",
+    "HealthDisplayDistance", "Height", "HeightScale", "HighCutFrequency", "HipHeight", "HipHeightScales",
+    "HoverAnimateFrequency", "HoverThickness", "InFocusRadius", "InclinationAngle", "IndexSize",
+    "InnerRadius", "Intensity", "JumpHeight", "JumpPower", "LadderSearchHeight", "LadderSearchOffset",
+    "LargeFileLineCountThreshold", "LargeFileThreshold", "LateDelayTime", "LayoutOrder",
+    "LeftAnkleSize", "LeftClavicleSize", "LeftElbowSize", "LeftHipSize", "LeftKneeSize",
+    "LeftShoulderSize", "LeftToeBaseSize", "LeftWristSize", "Length", "Lifetime", "LightEmission",
+    "LightInfluence", "LimitAngle0", "LimitAngle1", "LineHeight", "LineThickness", "LinearDamping",
+    "LinearResponsiveness", "LowShelfFrequency", "LowerAngle", "MasterVolume", "MasterVolumeStudio",
+    "MaxAcceleration", "MaxActivationDistance", "MaxAngle", "MaxAxisDistance", "MaxBlurSize",
+    "MaxDistance", "MaxDragAngle", "MaxForce", "MaxFrictionTorque", "MaxHealth", "MaxIndicatorDistance",
+    "MaxIndicatorsVisible", "MaxItems", "MaxLength", "MaxPlayers", "MaxPromptsVisible",
+    "MaxRollAngleLeft", "MaxRollAngleRight", "MaxSlopeAngle", "MaxSpeed", "MaxTextSize", "MaxThrust",
+    "MaxTorque", "MaxVisibleGraphemes", "MaximumSimulationRadius", "MeshCacheSize", "MiddleSize",
+    "MinDistance", "MinDragAngle", "MinLength", "MinTextSize", "MinimizeDistance", "MoonAngularSize",
+    "MotorMaxForce", "MotorMaxTorque", "MoveMaxForce", "MoveSpeedFactor", "NameDisplayDistance",
+    "NearIntensity", "NearPlaneZ", "NeckSize", "NumPlayers", "Offset", "OffsetStudsU", "OffsetStudsV",
+    "Padding", "PaddingBottom", "PaddingLeft", "PaddingRight", "PaddingTop", "PartyVoiceVolume",
+    "PinkySize", "PitchMaxTorque", "PitchSpeedFactor", "PixelsPerStud", "PlaybackSpeed",
+    "PressedThreshold", "PromptHoldDuration", "ProportionScale", "RCCProfilerRecordFrameRate",
+    "RCCProfilerRecordTimeFrame", "Radius", "RampTime", "Range", "Rate", "ReferenceFrequency",
+    "ReleasedThreshold", "RenderingTestFrameCount", "RespawnTime", "Responsiveness", "Restitution",
+    "RightAnkleSize", "RightClavicleSize", "RightElbowSize", "RightHipSize", "RightKneeSize",
+    "RightShoulderSize", "RightToeBaseSize", "RightWristSize", "RingSize", "RollMaxTorque",
+    "RollOffMaxDistance", "RollOffMinDistance", "RollSpeedFactor", "RolloffScale", "RootSize", "Scale",
+    "ScaleFactor", "ScriptTimeoutLength", "ScrollBarThickness", "SearchDistance",
+    "SelectionModeRotateSpeed", "ServoMaxForce", "ServoMaxTorque", "SimulationRadius", "Size",
+    "SliceScale", "SmoothTime", "SmoothingAngle", "Speed", "SpineSize", "Spread", "SpringDamping",
+    "SpringStiffness", "StandForce", "StandSpeed", "StarCount", "StepIdOffset", "Stiffness",
+    "StudsPerTileU", "StudsPerTileV", "SunAngularSize", "TargetAngle", "TargetPosition", "TargetRadius",
+    "TextSize", "TextureLength", "TextureSpeed", "Thickness", "Threshold", "ThrottleAdjustTime",
+    "ThrustSpeed", "ThumbSize", "Time", "TimePosition", "TimeScale", "Timeout", "ToolPunchThroughDistance",
+    "Torque", "TorqueDrawScale", "TriangleCount", "TriggerDistance", "TurnMaxTorque", "TurnSpeed",
+    "TurnSpeedFactor", "TweenTime", "TwistLowerAngle", "TwistUpperAngle", "UpperAngle",
+    "VRRotationIntensity", "VerticalStudsOffset", "VoiceChatVolume", "Volume", "WaistSize", "WalkSpeed",
+    "WalkSpeedScales", "WaterWaveSize", "WaterWaveSpeed", "Width", "Width0", "Width1", "WidthScale",
+    "WinchForce", "WinchResponsiveness", "WinchSpeed", "WireRadius", "ZIndex", "ZOffset",
 }
 
 local booleanPseudoProps = {
-    AcousticSimulationEnabled, Active, AddModelToInventory, AddPathsToBundle,
-    AlignDraggedObjects, AllScopes, AllTutorialsDisabled, AllowInsertFreeAssets, AllowSleep,
-    AllowTeamChangeOnTouch, AllowThirdPartySales, AlwaysOnTop, Anchored, AngleSnapEnabled,
-    AngularLimitsEnabled, AnimateHover, Animated, ApplyAtCenterOfMass, Archivable,
-    AreAnchorsShown, AreAssembliesShown, AreAssemblyCentersOfMassShown,
-    AreAwakePartsHighlighted, AreBodyTypesShown, AreCollisionCostsShown,
-    AreConstraintForcesShownForSelectedOrHoveredInstances,
-    AreConstraintTorquesShownForSelectedOrHoveredInstances,
-    AreContactForcesShownForSelectedOrHoveredAssemblies, AreContactIslandsShown,
-    AreContactPointsShown, AreGravityForcesShownForSelectedOrHoveredAssemblies,
-    AreJointCoordinatesShown, AreMagnitudesShownForDrawnForcesAndTorques, AreMechanismsShown,
-    AreModelCoordsShown, AreNonAnchorsShown, AreOwnersShown, ArePartCoordsShown,
-    AreRegionsShown, AreSolverIslandsShown, AreTerrainReplicationRegionsShown,
-    AreTimestepsShown, AreUnalignedPartsShown, AreWorldCoordsShown, AudioCanCollide,
-    AutoAssignable, AutoButtonColor, AutoHideParent, AutoJumpEnabled, AutoLoad, AutoLocalize,
-    AutoPlay, AutoResumeSyncOnPlaceOpen, AutoRotate, AutoRuns, AutoSelectGuiEnabled,
-    AutoUpdate, AutoUpdateEnabled, AutocompleteEnabled, AutocompleteVisible, AutomaticRetry,
-    AutomaticScalingEnabled, AvatarGestures, BadgeVisible, BalanceRigidityEnabled,
-    BreakJointsOnDeath, Browsable, BubbleChatEnabled, Bypass, CageMeshIntersectedPreview,
-    CageNonManifoldPreview, CageOverlappingVerticesPreview, CageUVMisMatchedPreview,
-    CameraAdaptiveSpeed, CameraAltLeftMouseToRotate, CameraTweenFocus,
-    CameraZoomToMousePosition, CanBeDropped, CanCollide, CanLoadCharacterAppearance, CanQuery,
-    CanSend, CanTouch, CastShadow, CelestialBodiesShown, CharacterAutoLoads,
-    CharacterBreakJointsOnDeath, CharacterUseJumpPower, ChatTranslationEnabled, ChatVisible,
-    Circular, ClampMagnitudeToOne, ClassicDeath, ClearTextOnFocus, ClickablePrompt,
-    ClickableWhenViewportHidden, ClientOnly, ClipToDeviceSafeArea, ClipsDescendants,
-    CloseWhenScreenshotTaken, Closed, CollisionsEnabled, CommandBarEnterExec,
-    CommandBarLocalState, ContinueExecution, CoverageInfo, CreateDefaultCommands,
-    CreateDefaultTextChannels, CustomBackAccessoryEnabled, CustomClassicPantsAccessoryEnabled,
-    CustomClassicShirtsAccessoryEnabled, CustomClassicTShirtsAccessoryEnabled,
-    CustomClimbAnimationEnabled, CustomDressSkirtAccessoryEnabled, CustomEyebrowEnabled,
-    CustomEyelashEnabled, CustomFaceAccessoryEnabled, CustomFaceEnabled,
-    CustomFallAnimationEnabled, CustomFrontAccessoryEnabled, CustomHairAccessoryEnabled,
-    CustomHeadAccessoryEnabled, CustomHeadEnabled, CustomIdleAlt1AnimationEnabled,
-    CustomIdleAlt2AnimationEnabled, CustomIdleAnimationEnabled, CustomJacketAccessoryEnabled,
-    CustomJumpAnimationEnabled, CustomLeftArmEnabled, CustomLeftLegEnabled,
-    CustomLeftShoesAccessoryEnabled, CustomMoodEnabled, CustomNeckAccessoryEnabled,
-    CustomPantsAccessoryEnabled, CustomRightArmEnabled, CustomRightLegEnabled,
-    CustomRightShoesAccessoryEnabled, CustomRunAnimationEnabled, CustomShirtAccessoryEnabled,
-    CustomShortsAccessoryEnabled, CustomShoulderAccessoryEnabled,
-    CustomSweaterAccessoryEnabled, CustomSwimAnimationEnabled, CustomSwimIdleAnimationEnabled,
-    CustomTShirtAccessoryEnabled, CustomTorsoEnabled, CustomWaistAccessoryEnabled,
-    CustomWalkAnimationEnabled, DebugInfo, Deprecated, DeprecatedObjectsShown,
-    DevEnableMouseLock, DiffractionEnabled, DisableCSGv2, DisableCSGv3ForPlugins,
-    DisableUIDragDetectorDrags, Disabled, DoubleSided, DraggerShowAxisTicks,
-    DraggerShowHoverRuler, DraggerShowMeasurement, DraggerShowNegativeAxes, DraggerShowPlanes,
-    DraggerShowTargetSnap, DraggerShowTrackball, DraggerShowWhileDragging,
-    DrawConstraintsNetForce, DrawContactsNetForce, DrawTotalNetForce, EagerBulkExecution,
-    EditModeActive, EditingDisabled, Editor, EnableClimbing, EnableCodeAssist,
-    EnableCrouching, EnableDefaultVoice, EnableEmissives, EnableFallingDown, EnableFindOnType,
-    EnableFluidForces, EnableForceVisualizationSmoothing, EnableGettingUp, EnableHolding,
-    EnableIndentationRulers, EnableJumping, EnableMouseLockOption, EnableReaching,
-    EnableRunning, EnableSelectionTooltips, EnableSitting, EnableSkinning, EnableSound,
-    EnableSprinting, EnableStrafing, EnableStudioStreaming, EnableSwimming, EnableVFX,
-    EnableVideoAds, Enabled, EvaluateStateMachine, ExecuteWithStudioRun,
-    ExportMergeByMaterial, FaceCamera, FadeOutViewOnCollision, FallHeightEnabled,
-    FillEmptySpaceColumns, FillEmptySpaceRows, FlattenTree, FlipbookBlendFrames,
-    FlipbookStartRandom, ForceLimitsEnabled, ForwardInput, Fullscreen, FullySubmerged,
-    GamepadCursorEnabled, GamepadInputEnabled, GlobalShadows, GoodbyeChoiceActive,
-    GuiNavigationEnabled, HasEverUsedVR, HasRobloxSubscription, HasVerifiedBadge, HeadLocked,
-    HeadsUpDisplay, HideCoreGuiForCaptures, HidePlayerGuiForCaptures, HighCompression, Hollow,
-    HttpEnabled, HttpProxyEnabled, IgnoreGuiInset, IgnoreVertexColors, ImportAsModelAsset,
-    ImportAsPackage, InUse, InsertInWorkspace, InsertWithScenePosition, Insertable,
-    Interactable, InverseSquareLaw, InvertNegativeFaces, IrrelevantCageModifiedPreview,
-    IsArrowVisible, IsBackend, IsBidirectional, IsCaptureModeForReport, IsDebuggable,
-    IsEnabled, IsInterpolationThrottleShown, IsKinematic, IsLayered,
-    IsPhysicsEnvironmentalThrottled, IsPlaying, IsReceiveAgeShown, IsRecording,
-    IsScriptStackTracingEnabled, IsSleepAllowed, IsTreeShown, JointsEnabled, Jump,
-    KeepPlayerHead, KeepZeroInfluenceBones, LimitsEnabled, LinearSnapEnabled,
-    LoadAllBuiltinPluginsInRunModes, LoadCharacterAppearance, LoadDefaultChat,
-    LoadInternalPlugins, LoadUserPluginsInRunModes, Loaded, LockCameraSpeed, Locked,
-    LockedToPart, LoggingEnabled, Loop, Looped, Looping, LuaDebuggerEnabled,
-    MaintainAngularMomentum, MaintainLinearMomentum, ManualActivationOnly, Massless,
-    MaxQualityEnabled, MergeMeshes, MeshHoleDetectedPreview, Modal, MouseIconEnabled,
-    MultiLine, Muted, Neutral, OcclusionEnabled, Open, OuterCageFarExtendedFromMeshPreview,
-    PackAsSource, PartSnapEnabled, PassThrough, PerfTest, PivotSnapToGeometry, PlatformStand,
-    PlayOnRemove, PlaybackRegionsEnabled, PlayerListVisible, PlayerNamesEnabled, Playing,
-    PluginDebuggingEnabled, PreferLodEnabled, PrimaryAxisOnly, PrintJoinSizeBreakdown,
-    PrintPhysicsErrors, PrintStreamInstanceQuota, PrioritizeLightingQuality, PublishLocked,
-    QualityAuto, RandomizeJoinInstanceOrder, ReactionForceEnabled, ReactionTorqueEnabled,
-    ReloadAssets, ReloadBuiltinPluginsOnChange, ReloadLocalPluginsOnChange,
-    RenderCSGTrianglesDebug, RenderStreamedRegions, ReportSoundWarnings, RequiresHandle,
-    RequiresLineOfSight, RequiresNeck, ResetOnSpawn, RespectFilteringEnabled, ReverbEnabled,
-    RichText, RigVisualization, RigidityEnabled, RotationAxisVisible, RunLocally, Sandboxed,
-    ScrollWheelInputEnabled, ScrollingEnabled, Selectable, Selected, SelectionGroup,
-    SerializePatch, ServerOnly, Shadows, ShouldImport, ShouldReserveServer, ShouldSkip,
-    ShowActiveAnimationAsset, ShowBoundingBoxes, ShowCorePackagesInExplorer,
-    ShowDecompositionGeometry, ShowDevelopmentGui,
-    ShowFluidForcesForSelectedOrHoveredMechanisms, ShowHover,
-    ShowInstanceNamesForDrawnForcesAndTorques, ShowNativeInput, ShowPivotIndicator, Sink, Sit,
-    SpectrumEnabled, StartServer, StaticFacialAnimation, StickyWheels, StreamingEnabled,
-    TailVisible, TextEditable, TextScaled, TextWrapped, ThrottlePhysicsToRealtime,
-    TouchControlsEnabled, TouchInputEnabled, TouchingSurface, TwistLimitsEnabled,
-    Use2022Materials, UseAvatarSettings, UseCSGv2, UseCache, UseDefaultExternalEditor,
-    UseFileLevelCompressionInsteadOfChunk, UseImportedPivot, UseJumpPower, UseLocalSpace,
-    UsePartColor, UseSceneOriginAsPivot, UsedCoreGuiIsVisibleToggle,
-    UsedCustomGuiIsVisibleToggle, UsedHideHudShortcut, UserEmotesEnabled, UsesCages,
-    VREnabled, VRSmoothRotationEnabled, VRTiltAndRollEnabled, ValidateUgcBody, Value,
-    VignetteEnabled, Visible, WinchEnabled, WindAffectsDrag, Wraps, ZstdCompression,
-    isContextDependentBreakpoint,
+    "AcousticSimulationEnabled", "Active", "AddModelToInventory", "AddPathsToBundle",
+    "AlignDraggedObjects", "AllScopes", "AllTutorialsDisabled", "AllowInsertFreeAssets", "AllowSleep",
+    "AllowTeamChangeOnTouch", "AllowThirdPartySales", "AlwaysOnTop", "Anchored", "AngleSnapEnabled",
+    "AngularLimitsEnabled", "AnimateHover", "Animated", "ApplyAtCenterOfMass", "Archivable",
+    "AreAnchorsShown", "AreAssembliesShown", "AreAssemblyCentersOfMassShown",
+    "AreAwakePartsHighlighted", "AreBodyTypesShown", "AreCollisionCostsShown",
+    "AreConstraintForcesShownForSelectedOrHoveredInstances",
+    "AreConstraintTorquesShownForSelectedOrHoveredInstances",
+    "AreContactForcesShownForSelectedOrHoveredAssemblies", "AreContactIslandsShown",
+    "AreContactPointsShown", "AreGravityForcesShownForSelectedOrHoveredAssemblies",
+    "AreJointCoordinatesShown", "AreMagnitudesShownForDrawnForcesAndTorques", "AreMechanismsShown",
+    "AreModelCoordsShown", "AreNonAnchorsShown", "AreOwnersShown", "ArePartCoordsShown",
+    "AreRegionsShown", "AreSolverIslandsShown", "AreTerrainReplicationRegionsShown",
+    "AreTimestepsShown", "AreUnalignedPartsShown", "AreWorldCoordsShown", "AudioCanCollide",
+    "AutoAssignable", "AutoButtonColor", "AutoHideParent", "AutoJumpEnabled", "AutoLoad", "AutoLocalize",
+    "AutoPlay", "AutoResumeSyncOnPlaceOpen", "AutoRotate", "AutoRuns", "AutoSelectGuiEnabled",
+    "AutoUpdate", "AutoUpdateEnabled", "AutocompleteEnabled", "AutocompleteVisible", "AutomaticRetry",
+    "AutomaticScalingEnabled", "AvatarGestures", "BadgeVisible", "BalanceRigidityEnabled",
+    "BreakJointsOnDeath", "Browsable", "BubbleChatEnabled", "Bypass", "CageMeshIntersectedPreview",
+    "CageNonManifoldPreview", "CageOverlappingVerticesPreview", "CageUVMisMatchedPreview",
+    "CameraAdaptiveSpeed", "CameraAltLeftMouseToRotate", "CameraTweenFocus",
+    "CameraZoomToMousePosition", "CanBeDropped", "CanCollide", "CanLoadCharacterAppearance", "CanQuery",
+    "CanSend", "CanTouch", "CastShadow", "CelestialBodiesShown", "CharacterAutoLoads",
+    "CharacterBreakJointsOnDeath", "CharacterUseJumpPower", "ChatTranslationEnabled", "ChatVisible",
+    "Circular", "ClampMagnitudeToOne", "ClassicDeath", "ClearTextOnFocus", "ClickablePrompt",
+    "ClickableWhenViewportHidden", "ClientOnly", "ClipToDeviceSafeArea", "ClipsDescendants",
+    "CloseWhenScreenshotTaken", "Closed", "CollisionsEnabled", "CommandBarEnterExec",
+    "CommandBarLocalState", "ContinueExecution", "CoverageInfo", "CreateDefaultCommands",
+    "CreateDefaultTextChannels", "CustomBackAccessoryEnabled", "CustomClassicPantsAccessoryEnabled",
+    "CustomClassicShirtsAccessoryEnabled", "CustomClassicTShirtsAccessoryEnabled",
+    "CustomClimbAnimationEnabled", "CustomDressSkirtAccessoryEnabled", "CustomEyebrowEnabled",
+    "CustomEyelashEnabled", "CustomFaceAccessoryEnabled", "CustomFaceEnabled",
+    "CustomFallAnimationEnabled", "CustomFrontAccessoryEnabled", "CustomHairAccessoryEnabled",
+    "CustomHeadAccessoryEnabled", "CustomHeadEnabled", "CustomIdleAlt1AnimationEnabled",
+    "CustomIdleAlt2AnimationEnabled", "CustomIdleAnimationEnabled", "CustomJacketAccessoryEnabled",
+    "CustomJumpAnimationEnabled", "CustomLeftArmEnabled", "CustomLeftLegEnabled",
+    "CustomLeftShoesAccessoryEnabled", "CustomMoodEnabled", "CustomNeckAccessoryEnabled",
+    "CustomPantsAccessoryEnabled", "CustomRightArmEnabled", "CustomRightLegEnabled",
+    "CustomRightShoesAccessoryEnabled", "CustomRunAnimationEnabled", "CustomShirtAccessoryEnabled",
+    "CustomShortsAccessoryEnabled", "CustomShoulderAccessoryEnabled",
+    "CustomSweaterAccessoryEnabled", "CustomSwimAnimationEnabled", "CustomSwimIdleAnimationEnabled",
+    "CustomTShirtAccessoryEnabled", "CustomTorsoEnabled", "CustomWaistAccessoryEnabled",
+    "CustomWalkAnimationEnabled", "DebugInfo", "Deprecated", "DeprecatedObjectsShown",
+    "DevEnableMouseLock", "DiffractionEnabled", "DisableCSGv2", "DisableCSGv3ForPlugins",
+    "DisableUIDragDetectorDrags", "Disabled", "DoubleSided", "DraggerShowAxisTicks",
+    "DraggerShowHoverRuler", "DraggerShowMeasurement", "DraggerShowNegativeAxes", "DraggerShowPlanes",
+    "DraggerShowTargetSnap", "DraggerShowTrackball", "DraggerShowWhileDragging",
+    "DrawConstraintsNetForce", "DrawContactsNetForce", "DrawTotalNetForce", "EagerBulkExecution",
+    "EditModeActive", "EditingDisabled", "Editor", "EnableClimbing", "EnableCodeAssist",
+    "EnableCrouching", "EnableDefaultVoice", "EnableEmissives", "EnableFallingDown", "EnableFindOnType",
+    "EnableFluidForces", "EnableForceVisualizationSmoothing", "EnableGettingUp", "EnableHolding",
+    "EnableIndentationRulers", "EnableJumping", "EnableMouseLockOption", "EnableReaching",
+    "EnableRunning", "EnableSelectionTooltips", "EnableSitting", "EnableSkinning", "EnableSound",
+    "EnableSprinting", "EnableStrafing", "EnableStudioStreaming", "EnableSwimming", "EnableVFX",
+    "EnableVideoAds", "Enabled", "EvaluateStateMachine", "ExecuteWithStudioRun",
+    "ExportMergeByMaterial", "FaceCamera", "FadeOutViewOnCollision", "FallHeightEnabled",
+    "FillEmptySpaceColumns", "FillEmptySpaceRows", "FlattenTree", "FlipbookBlendFrames",
+    "FlipbookStartRandom", "ForceLimitsEnabled", "ForwardInput", "Fullscreen", "FullySubmerged",
+    "GamepadCursorEnabled", "GamepadInputEnabled", "GlobalShadows", "GoodbyeChoiceActive",
+    "GuiNavigationEnabled", "HasEverUsedVR", "HasRobloxSubscription", "HasVerifiedBadge", "HeadLocked",
+    "HeadsUpDisplay", "HideCoreGuiForCaptures", "HidePlayerGuiForCaptures", "HighCompression", "Hollow",
+    "HttpEnabled", "HttpProxyEnabled", "IgnoreGuiInset", "IgnoreVertexColors", "ImportAsModelAsset",
+    "ImportAsPackage", "InUse", "InsertInWorkspace", "InsertWithScenePosition", "Insertable",
+    "Interactable", "InverseSquareLaw", "InvertNegativeFaces", "IrrelevantCageModifiedPreview",
+    "IsArrowVisible", "IsBackend", "IsBidirectional", "IsCaptureModeForReport", "IsDebuggable",
+    "IsEnabled", "IsInterpolationThrottleShown", "IsKinematic", "IsLayered",
+    "IsPhysicsEnvironmentalThrottled", "IsPlaying", "IsReceiveAgeShown", "IsRecording",
+    "IsScriptStackTracingEnabled", "IsSleepAllowed", "IsTreeShown", "JointsEnabled", "Jump",
+    "KeepPlayerHead", "KeepZeroInfluenceBones", "LimitsEnabled", "LinearSnapEnabled",
+    "LoadAllBuiltinPluginsInRunModes", "LoadCharacterAppearance", "LoadDefaultChat",
+    "LoadInternalPlugins", "LoadUserPluginsInRunModes", "Loaded", "LockCameraSpeed", "Locked",
+    "LockedToPart", "LoggingEnabled", "Loop", "Looped", "Looping", "LuaDebuggerEnabled",
+    "MaintainAngularMomentum", "MaintainLinearMomentum", "ManualActivationOnly", "Massless",
+    "MaxQualityEnabled", "MergeMeshes", "MeshHoleDetectedPreview", "Modal", "MouseIconEnabled",
+    "MultiLine", "Muted", "Neutral", "OcclusionEnabled", "Open", "OuterCageFarExtendedFromMeshPreview",
+    "PackAsSource", "PartSnapEnabled", "PassThrough", "PerfTest", "PivotSnapToGeometry", "PlatformStand",
+    "PlayOnRemove", "PlaybackRegionsEnabled", "PlayerListVisible", "PlayerNamesEnabled", "Playing",
+    "PluginDebuggingEnabled", "PreferLodEnabled", "PrimaryAxisOnly", "PrintJoinSizeBreakdown",
+    "PrintPhysicsErrors", "PrintStreamInstanceQuota", "PrioritizeLightingQuality", "PublishLocked",
+    "QualityAuto", "RandomizeJoinInstanceOrder", "ReactionForceEnabled", "ReactionTorqueEnabled",
+    "ReloadAssets", "ReloadBuiltinPluginsOnChange", "ReloadLocalPluginsOnChange",
+    "RenderCSGTrianglesDebug", "RenderStreamedRegions", "ReportSoundWarnings", "RequiresHandle",
+    "RequiresLineOfSight", "RequiresNeck", "ResetOnSpawn", "RespectFilteringEnabled", "ReverbEnabled",
+    "RichText", "RigVisualization", "RigidityEnabled", "RotationAxisVisible", "RunLocally", "Sandboxed",
+    "ScrollWheelInputEnabled", "ScrollingEnabled", "Selectable", "Selected", "SelectionGroup",
+    "SerializePatch", "ServerOnly", "Shadows", "ShouldImport", "ShouldReserveServer", "ShouldSkip",
+    "ShowActiveAnimationAsset", "ShowBoundingBoxes", "ShowCorePackagesInExplorer",
+    "ShowDecompositionGeometry", "ShowDevelopmentGui",
+    "ShowFluidForcesForSelectedOrHoveredMechanisms", "ShowHover",
+    "ShowInstanceNamesForDrawnForcesAndTorques", "ShowNativeInput", "ShowPivotIndicator", "Sink", "Sit",
+    "SpectrumEnabled", "StartServer", "StaticFacialAnimation", "StickyWheels", "StreamingEnabled",
+    "TailVisible", "TextEditable", "TextScaled", "TextWrapped", "ThrottlePhysicsToRealtime",
+    "TouchControlsEnabled", "TouchInputEnabled", "TouchingSurface", "TwistLimitsEnabled",
+    "Use2022Materials", "UseAvatarSettings", "UseCSGv2", "UseCache", "UseDefaultExternalEditor",
+    "UseFileLevelCompressionInsteadOfChunk", "UseImportedPivot", "UseJumpPower", "UseLocalSpace",
+    "UsePartColor", "UseSceneOriginAsPivot", "UsedCoreGuiIsVisibleToggle",
+    "UsedCustomGuiIsVisibleToggle", "UsedHideHudShortcut", "UserEmotesEnabled", "UsesCages",
+    "VREnabled", "VRSmoothRotationEnabled", "VRTiltAndRollEnabled", "ValidateUgcBody", "Value",
+    "VignetteEnabled", "Visible", "WinchEnabled", "WindAffectsDrag", "Wraps", "ZstdCompression",
+    "isContextDependentBreakpoint",
 }
 
 local stringPseudoProps = {
-    ActionText, AdorneeName, Album, Artist, AudioInteractionGroup, BackAccessory, CameraId,
-    ClassCategory, CollisionGroup, Condition, Constraint, ContentId, ContextLabel,
-    DefaultName, Description, DiffuseFilePath, DisplayLanguage, DisplayName, EditorType,
-    EmissiveFilePath, ExistingPackageId, Expression, FFlag, FaceAccessory,
-    FlipbookIncompatible, FrontAccessory, GoodbyeDialog, HairAccessory, HatAccessory,
-    HeadShape, HttpProxyURL, Icon, ImportName, InitialPrompt, Interface, InviteMessageId,
-    Label, LaunchData, LogExpression, Manifest, MaterialVariant, MessageId, Metadata,
-    MetalnessFilePath, Name, NeckAccessory, NodeId, NormalFilePath, ObjectText,
-    OnboardingsCompleted, OpenTypeFeatures, OutputPath, PatchId, PlaceholderText,
-    PreferredParent, PrefixText, PrimaryAlias, PromptMessage, ReservedServerAccessCode,
-    ResponseDialog, RoughnessFilePath, Rulers, ScriptContext, SearchKeyword, SecondaryAlias,
-    Secrets, SelectedTheme, Selector, ServerInstanceId, ShouldersAccessory, SliderScaling,
-    SourceLocaleId, SourceName, SystemPrompt, Tag, TargetName, TargetPath, Text, Ticket,
-    TimeOfDay, Title, ToolTip, Translation, UserDialog, Value, VoiceId, WaistAccessory,
+    "ActionText", "AdorneeName", "Album", "Artist", "AudioInteractionGroup", "BackAccessory", "CameraId",
+    "ClassCategory", "CollisionGroup", "Condition", "Constraint", "ContentId", "ContextLabel",
+    "DefaultName", "Description", "DiffuseFilePath", "DisplayLanguage", "DisplayName", "EditorType",
+    "EmissiveFilePath", "ExistingPackageId", "Expression", "FFlag", "FaceAccessory",
+    "FlipbookIncompatible", "FrontAccessory", "GoodbyeDialog", "HairAccessory", "HatAccessory",
+    "HeadShape", "HttpProxyURL", "Icon", "ImportName", "InitialPrompt", "Interface", "InviteMessageId",
+    "Label", "LaunchData", "LogExpression", "Manifest", "MaterialVariant", "MessageId", "Metadata",
+    "MetalnessFilePath", "Name", "NeckAccessory", "NodeId", "NormalFilePath", "ObjectText",
+    "OnboardingsCompleted", "OpenTypeFeatures", "OutputPath", "PatchId", "PlaceholderText",
+    "PreferredParent", "PrefixText", "PrimaryAlias", "PromptMessage", "ReservedServerAccessCode",
+    "ResponseDialog", "RoughnessFilePath", "Rulers", "ScriptContext", "SearchKeyword", "SecondaryAlias",
+    "Secrets", "SelectedTheme", "Selector", "ServerInstanceId", "ShouldersAccessory", "SliderScaling",
+    "SourceLocaleId", "SourceName", "SystemPrompt", "Tag", "TargetName", "TargetPath", "Text", "Ticket",
+    "TimeOfDay", "Title", "ToolTip", "Translation", "UserDialog", "Value", "VoiceId", "WaistAccessory",
 }
 
 local color3PseudoProps = {
-    Ambient, BackgroundColor3, BorderColor3, Color, Color3, ColorShift_Bottom, ColorShift_Top,
-    Decay, DraggerActiveColor, DraggerPassiveColor, EmissiveTint, FillColor, FogColor,
-    GeometrySnapColor, GroupColor3, HeadColor, HeadColor3, HintColor, HoverBackgroundColor3,
-    ImageColor3, IndentationRulerColor, InformationColor, LeftArmColor, LeftArmColor3,
-    LeftLegColor, LeftLegColor3, LightColor, OutdoorAmbient, OutlineColor, PlaceholderColor3,
-    RightArmColor, RightArmColor3, RightLegColor, RightLegColor3, ScrollBarImageColor3,
-    SecondaryColor, SelectedTabTextColor3, SparkleColor, SurfaceColor3, TextColor3,
-    TextStrokeColor3, TintColor, TorsoColor, TorsoColor3, TypeColor, VAxisColor, Value,
-    VideoColor3, WaterColor, XAxisColor, YAxisColor, ZAxisColor,
+    "Ambient", "BackgroundColor3", "BorderColor3", "Color", "Color3", "ColorShift"_"Bottom", "ColorShift"_"Top",
+    "Decay", "DraggerActiveColor", "DraggerPassiveColor", "EmissiveTint", "FillColor", "FogColor",
+    "GeometrySnapColor", "GroupColor3", "HeadColor", "HeadColor3", "HintColor", "HoverBackgroundColor3",
+    "ImageColor3", "IndentationRulerColor", "InformationColor", "LeftArmColor", "LeftArmColor3",
+    "LeftLegColor", "LeftLegColor3", "LightColor", "OutdoorAmbient", "OutlineColor", "PlaceholderColor3",
+    "RightArmColor", "RightArmColor3", "RightLegColor", "RightLegColor3", "ScrollBarImageColor3",
+    "SecondaryColor", "SelectedTabTextColor3", "SparkleColor", "SurfaceColor3", "TextColor3",
+    "TextStrokeColor3", "TintColor", "TorsoColor", "TorsoColor3", "TypeColor", "VAxisColor", "Value",
+    "VideoColor3", "WaterColor", "XAxisColor", "YAxisColor", "ZAxisColor",
 }
 
-local vector3PseudoProps = {
-    Acceleration, AngularVelocity, AssemblyAngularVelocity, AssemblyLinearVelocity, Axis,
-    CameraOffset, ChestRangeMax, ChestRangeMin, Delta, ExtentsOffset, ExtentsOffsetWorldSpace,
-    F0, F1, F2, F3, FacingDirection, Force, GlobalWind, HeadBaseRangeMax, HeadBaseRangeMin,
-    HitNormal, IndexRange, InsertPoint, LeftAnkleRangeMax, LeftAnkleRangeMin,
-    LeftClavicleRangeMax, LeftClavicleRangeMin, LeftElbowRangeMax, LeftElbowRangeMin,
-    LeftHipRangeMax, LeftHipRangeMin, LeftKneeRangeMax, LeftKneeRangeMin,
-    LeftShoulderRangeMax, LeftShoulderRangeMin, LeftToeBaseRangeMax, LeftToeBaseRangeMin,
-    LeftWristRangeMax, LeftWristRangeMin, LightDirection, LimitBounds, LineDirection,
-    LocalPlayerStudsOffset, Location, LookAtPosition, MaxAxesForce, MaxDragTranslation,
-    MaxForce, MaxTorque, MiddleRange, MinDragTranslation, MovingDirection, NeckRangeMax,
-    NeckRangeMin, Offset, Orientation, PinkyRange, Point, Position, PrimaryAxis,
-    PrimaryTangentAxis, RightAnkleRangeMax, RightAnkleRangeMin, RightClavicleRangeMax,
-    RightClavicleRangeMin, RightElbowRangeMax, RightElbowRangeMin, RightHipRangeMax,
-    RightHipRangeMin, RightKneeRangeMax, RightKneeRangeMin, RightShoulderRangeMax,
-    RightShoulderRangeMin, RightToeBaseRangeMax, RightToeBaseRangeMin, RightWristRangeMax,
-    RightWristRangeMin, RingRange, RootRangeMax, RootRangeMin, Rotation, Scale, SecondaryAxis,
-    SecondaryTangentAxis, SingleColliderSize, Size, SizeRelativeOffset, SkyboxOrientation,
-    SpineRangeMax, SpineRangeMin, StudsOffset, StudsOffsetWorldSpace, TargetOffset,
-    TargetPoint, ThumbRange, Torque, TriggerOffset, UpDirection, Value, Vector3Scale,
-    VectorVelocity, Velocity, VertexColor, WaistRangeMax, WaistRangeMin, WalkToPoint,
-    WorldAxis, WorldSecondaryAxis,
+local vector3PseudoProps ={
+    "Acceleration", "AngularVelocity", "AssemblyAngularVelocity", "AssemblyLinearVelocity", "Axis",
+    "CameraOffset", "ChestRangeMax", "ChestRangeMin", "Delta", "ExtentsOffset", "ExtentsOffsetWorldSpace",
+    "F0", "F1", "F2", "F3", "FacingDirection", "Force", "GlobalWind", "HeadBaseRangeMax", "HeadBaseRangeMin",
+    "HitNormal", "IndexRange", "InsertPoint", "LeftAnkleRangeMax", "LeftAnkleRangeMin",
+    "LeftClavicleRangeMax", "LeftClavicleRangeMin", "LeftElbowRangeMax", "LeftElbowRangeMin",
+    "LeftHipRangeMax", "LeftHipRangeMin", "LeftKneeRangeMax", "LeftKneeRangeMin",
+    "LeftShoulderRangeMax", "LeftShoulderRangeMin", "LeftToeBaseRangeMax", "LeftToeBaseRangeMin",
+    "LeftWristRangeMax", "LeftWristRangeMin", "LightDirection", "LimitBounds", "LineDirection",
+    "LocalPlayerStudsOffset", "Location", "LookAtPosition", "MaxAxesForce", "MaxDragTranslation",
+    "MaxForce", "MaxTorque", "MiddleRange", "MinDragTranslation", "MovingDirection", "NeckRangeMax",
+    "NeckRangeMin", "Offset", "Orientation", "PinkyRange", "Point", "Position", "PrimaryAxis",
+    "PrimaryTangentAxis", "RightAnkleRangeMax", "RightAnkleRangeMin", "RightClavicleRangeMax",
+    "RightClavicleRangeMin", "RightElbowRangeMax", "RightElbowRangeMin", "RightHipRangeMax",
+    "RightHipRangeMin", "RightKneeRangeMax", "RightKneeRangeMin", "RightShoulderRangeMax",
+    "RightShoulderRangeMin", "RightToeBaseRangeMax", "RightToeBaseRangeMin", "RightWristRangeMax",
+    "RightWristRangeMin", "RingRange", "RootRangeMax", "RootRangeMin", "Rotation", "Scale", "SecondaryAxis",
+    "SecondaryTangentAxis", "SingleColliderSize", "Size", "SizeRelativeOffset", "SkyboxOrientation",
+    "SpineRangeMax", "SpineRangeMin", "StudsOffset", "StudsOffsetWorldSpace", "TargetOffset",
+    "TargetPoint", "ThumbRange", "Torque", "TriggerOffset", "UpDirection", "Value", "Vector3Scale",
+    "VectorVelocity", "Velocity", "VertexColor", "WaistRangeMax", "WaistRangeMin", "WalkToPoint",
+    "WorldAxis", "WorldSecondaryAxis",
 }
 
 local udim2PseudoProps = {
-    CameraButtonPosition, CanvasSize, CellPadding, CellSize, CloseButtonPosition, DragUDim2,
-    MaxDragTranslation, MinDragTranslation, Offset, Padding, Position, SelectionModeDragSpeed,
-    Size, Spread, TileSize,
+    "CameraButtonPosition", "CanvasSize", "CellPadding", "CellSize", "CloseButtonPosition", "DragUDim2",
+    "MaxDragTranslation", "MinDragTranslation", "Offset", "Padding", "Position", "SelectionModeDragSpeed",
+    "Size", "Spread", "TileSize",
 }
 local classDefaultProperties: { [string]: { [string]: any } } = {
     AccessoryDescription = {
@@ -4016,7 +4000,7 @@ makeProxy = function(name: string): any
                     method = "GET",
                 })
                 if res.statusCode == 200 then
-                    local data = serde.decode("json", res.body)
+                    local data = JSON.deserialize(res.body)
                     return {
                         AssetId = id,
                         Name = data.Name or "Asset",
@@ -4083,7 +4067,7 @@ makeProxy = function(name: string): any
             if type(firstArg) ~= "string" then
                 error("JSONDecode: invalid argument", 0)
             end
-            local ok, result = pcall(function() return serde.decode("json", firstArg) end)
+            local ok, result = pcall(function() return JSON.deserialize(firstArg) end)
             if not ok then
                 error("JSONDecode: invalid JSON", 0)
             end
@@ -4199,41 +4183,6 @@ makeProxy = function(name: string): any
             local parentName = proxyName(parent)
             emit(string.format('local %s = %s:GetAllBoundActionInfo()', retName, parentName))
             return {}
-        end
-
-        if isMethod and (fieldName == "CompressBuffer" or fieldName == "DecompressBuffer") and parent then
-            local parentName = proxyName(parent)
-            local bufArg = args[startIdx]
-            local rawData = nil
-            if type(bufArg) == "string" then
-                rawData = bufArg
-            elseif type(bufArg) == "table" and bufArg._data then
-                rawData = bufArg._data
-            else
-                local ok, str = pcall(buffer.tostring, bufArg)
-                if ok and type(str) == "string" then
-                    rawData = str
-                end
-            end
-            local bufRepr = "nil"
-            if rawData then
-                bufRepr = "buffer.fromstring(\"<"..#rawData.." bytes>\")"
-            end
-            local zstdArg = args[startIdx + 1]
-            local zstdRepr = "Enum.CompressionAlgorithm.Zstd"
-            pcall(function()
-                local mt = getmetatable(zstdArg)
-                if mt and mt._name then zstdRepr = mt._name end
-            end)
-            emit(string.format('local %s = %s:%s(%s, %s)', retName, parentName, fieldName, bufRepr, zstdRepr))
-            if rawData and #rawData > 0 then
-                local mode = fieldName == "CompressBuffer" and "compress" or "decompress"
-                local ok2, result = pcall(serde[mode], "zstd", rawData)
-                if ok2 and type(result) == "string" and #result > 0 then
-                    return buffer.fromstring(result)
-                end
-            end
-            return buffer.fromstring("")
         end
 
         if isMethod and (fieldName == "SetMetadata" or fieldName == "GetMetadata") and parent then
@@ -4385,28 +4334,6 @@ makeProxy = function(name: string): any
             local parentName = proxyName(parent)
             emit(string.format('local %s = %s:%s(%s)', retName, parentName, fieldName, table.concat(parts, ", ")))
             return false
-        end
-
-        if isMethod and (fieldName == "CompressBuffer" or fieldName == "DecompressBuffer") and parent then
-            local parentName = proxyName(parent)
-            local bufArg = args[startIdx]
-            local rawData = nil
-            if type(bufArg) == "string" then rawData = bufArg
-            else
-                local ok, str = pcall(buffer.tostring, bufArg)
-                if ok and type(str) == "string" then rawData = str end
-            end
-            local bufRepr = "nil"
-            if rawData then bufRepr = "buffer.fromstring(\"<"..#rawData.." bytes>\")" end
-            emit(string.format('local %s = %s:%s(%s, %s)', retName, parentName, fieldName, bufRepr, "Enum.CompressionAlgorithm.Zstd"))
-            if rawData and #rawData > 0 then
-                local mode = fieldName == "CompressBuffer" and "compress" or "decompress"
-                local ok2, result = pcall(serde[mode], "zstd", rawData)
-                if ok2 and type(result) == "string" and #result > 0 then
-                    return buffer.fromstring(result)
-                end
-            end
-            return buffer.fromstring("")
         end
 
         if isMethod and fieldName == "WorldToScreenPoint" and parent then
@@ -4968,7 +4895,7 @@ knownCFunctions[unpack] = true
 local function createEnv()
     env = {}
     env._G = {}
-    env._ENV = env
+    -- _ENV does not exist in luau. Removed
     local function getFunctionWhat(f)
         if type(f) ~= "function" then
             return nil
@@ -5724,36 +5651,17 @@ local function createEnv()
             src = src:gsub("repeat ", "repeat if _VMC() then error('VM_BUDGET') end ")
             src = src:gsub("while true do", "while true do if _VMC() then error('VM_BUDGET') end ")
         end
-        local ok, compiled = pcall(luau.compile, src, { optimizationLevel = 1 })
+        local ok, compiled = pcall(luau.compile, '--!optimize 2\n' .. src)
         if not ok then
             return nil, tostring(compiled)
         end
-        local loadOk, fn = pcall(luau.load, compiled, { debugName = chunkname or "loadstring", environment = env })
+        local loadOk, fn = pcall(luau.load, compiled)
         if not loadOk or type(fn) ~= "function" then
             return nil, tostring(fn)
         end
         return fn
     end
-    env.load = function(src, chunkname, mode, envArg)
-        if type(src) == "string" then
-            local ok, compiled = pcall(luau.compile, src, { optimizationLevel = 1 })
-            if not ok then return nil, tostring(compiled) end
-            local loadOk, fn = pcall(luau.load, compiled, { debugName = chunkname or "load", environment = envArg or env })
-            if not loadOk or type(fn) ~= "function" then return nil, tostring(fn) end
-            return fn
-        elseif type(src) == "function" then
-            local chunks = {}
-            while true do
-                local chunk = src()
-                if not chunk then break end
-                table.insert(chunks, chunk)
-            end
-            local full = table.concat(chunks)
-            return env.loadstring(full, chunkname, mode, envArg)
-        end
-        return nil, "invalid argument #1 to 'load'"
-    end
-
+    -- load does not exist in Luau, removed.
     env.game = spyInstance("DataModel", "game", true)
     env.Game = env.game
     local gameMt = getmetatable(env.game)
@@ -5764,6 +5672,8 @@ local function createEnv()
     gameMt._setKeys["JobId"] = true
     gameMt._storedValues["GameId"] = math.random(100000000, 2147483646)
     gameMt._setKeys["GameId"] = true
+    gameMt._storedValues["gameId"] = gameMt._storedValues["GameId"]
+    gameMt._setKeys["gameId"] = true
     gameMt._storedValues["CreatorId"] = math.random(1, 999999)
     gameMt._setKeys["CreatorId"] = true
     env.workspace = spyInstance("Workspace", "workspace", true)
@@ -6404,8 +6314,7 @@ local function createEnv()
         local method = opts.Method or opts.method or "GET"
         local headers = opts.Headers or opts.headers or {}
         local body = opts.Body or opts.body
-        local netOpts = { method = method, headers = headers }
-        if body ~= nil then netOpts.body = body end
+        local netOpts = { method = method, headers = headers, body = body }
         local ok, res = pcall(net.request, url, netOpts)
         if not ok or not res then
             return { StatusCode = 0, Body = "", Success = false, Headers = {} }
@@ -6419,9 +6328,10 @@ local function createEnv()
         }
     end
     env.request = env.http_request
+    env.http = {request = env.http_request}
     env.setclipboard = function() end
     env.readfile = function() return "" end
-    env.writefile = function() end
+    env.writeStringToFile = function() end
     env.isfile = function() return false end
     env.newcclosure = function(f)
         if type(f) ~= "function" then error("invalid argument #1 to 'newcclosure'", 2) end
@@ -6588,7 +6498,7 @@ local function createEnv()
         if p and _fileSystem[p] then return _fileSystem[p] end
         return nil
     end
-    env.writefile = function(path, content)
+    env.writeStringToFile = function(path, content)
         local p = _resolvePath(path)
         if p then _fileSystem[p] = tostring(content or "") end
     end
@@ -6963,7 +6873,7 @@ local function createEnv()
             if k == "request" then return function() return {StatusCode=200,Body="",Success=true} end end
             if k == "setclipboard" then return function() end end
             if k == "readfile" then return function() return "" end end
-            if k == "writefile" then return function() end end
+            if k == "writeStringToFile" then return function() end end
             if k == "isfile" then return function() return false end end
             if k == "isfolder" then return function() return false end end
             if k == "getnamecallmethod" then return function() return "" end end
@@ -7103,9 +7013,7 @@ local function createEnv()
             return b64encode(table.concat(bytes))
         end,
         hash = function(data, algorithm)
-            local ok, result = pcall(serde.hash, algorithm or "sha256", data)
-            if ok and type(result) == "string" then return result end
-            return b64encode(tostring(data))
+            return 'hash' -- lol
         end,
     }, { __index = function(_, k) return function() return "" end end })
     env.base64 = { encode = b64encode, decode = b64decode }
@@ -7285,11 +7193,6 @@ local function beautify()
 end
 
 local DARKLUA_BIN = (process.env.DARKLUA_BIN or "darklua") :: string
-local SANDBOX_PRELUDE = table.concat({
-    "local io = nil",
-    "local dofile = nil",
-    "",
-}, "\n")
 
 local function isValidIdent(s: string): boolean
     return s ~= "" and s:match("^[%a_][%w_]*$") ~= nil
@@ -7645,8 +7548,9 @@ local function dump(source: string): string
 
     local fn
     local loadOk, loadErr = pcall(function()
-        local compiled = luau.compile(SANDBOX_PRELUDE .. source, { optimizationLevel = 2 })
-        fn = luau.load(compiled, { debugName = "envlog", environment = env })
+        -- note: why the hell would you do local io = nil local dofile = nil THESE DONT EXIST IN LUAU
+        local compiled = luau.compile("--!optimize 2\n" .. source)
+        fn = luau.load(compiled)
     end)
     if not loadOk or not fn then
         emit(string.format("-- Load error: %s", tostring(loadErr):sub(1, 200)))
@@ -7676,6 +7580,13 @@ local function dump(source: string): string
     return darkluaBeautify(raw)
 end
 
+if not Settings.ipt then
+    Settings.ipt = process.args[2]
+end
+if not Settings.out then
+    Settings.out = process.args[3]
+end
+
 if Settings.ipt then
     local ok, err = pcall(function()
         if not fs.isFile(Settings.ipt) then
@@ -7686,18 +7597,9 @@ if Settings.ipt then
         stdio.write("Error: " .. tostring(err) .. "\n")
         process.exit(1)
     end
-    local source = fs.readFile(Settings.ipt)
+    local source = fs.readFileToString(Settings.ipt)
     local result = dump(source)
-    fs.writeFile(Settings.out, result)
+    fs.writeStringToFile(Settings.out, result)
     stdio.write(string.format("Done! Output: %s (%d bytes, %d lines)\n", Settings.out, #result, #lines))
     process.exit(0)
-end
-
-while true do
-    local input = stdio.readLine()
-    if not input or input == "" then break end
-    local decoded = serde.decode("json", input)
-    local result = dump(decoded.script)
-    stdio.write(result)
-    stdio.write("\n---END---\n")
 end
