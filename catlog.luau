@@ -5050,6 +5050,7 @@ local function createEnv()
         end
     end
     env.coroutine = copyLib(coroutine)
+    local OSAddrFake = string.format("%x", math.random(1048576, 1099511627776))
     env.os = setmetatable({
         time = os.time,
         date = os.date,
@@ -5058,7 +5059,7 @@ local function createEnv()
     }, {
         _serialName = "os",
         __newindex = function() error("attempt to write to read-only library table", 2) end,
-        __tostring = function() return "table: 0x" .. string.format("%x", math.random(1048576, 1099511627776)) end,
+        __tostring = function() return OSAddrFake end,
     })
     env.debug = setmetatable({
         info = function(f, what)
@@ -6109,6 +6110,7 @@ local function createEnv()
     env.OverlapParams = newCtor("OverlapParams")
     env.PathWaypoint = newCtor("PathWaypoint")
     env.Font = setmetatable({}, { __index = function(_, k) return makeProxy("Font." .. tostring(k)) end })
+    local BufAddrFake = "table: 0x" .. string.format("%x", math.random(1048576, 1099511627776))
     env.buffer = setmetatable({
         create = function(n)
             if type(n) ~= "number" then n = 0 end
@@ -6162,7 +6164,7 @@ local function createEnv()
             end
             return function() return 0 end
         end,
-        __tostring = function() return "table: 0x" .. string.format("%x", math.random(1048576, 1099511627776)) end,
+        __tostring = function() return BufAddrFake end,
     })
     env.Buffer = env.buffer
 
@@ -6824,11 +6826,12 @@ local function createEnv()
         error("attempt to call a nil value", 2)
     end
     knownCFunctions[env.require] = true
+    local addrFake = "table: 0x" .. string.format("%x", math.random(1048576, 1099511627776))
     env.shared = setmetatable({}, {
         _serialName = "shared",
         __index = function(_, k) return env[k] end,
         __newindex = function(t, k, v) env[k] = v; rawset(t, k, v) end,
-        __tostring = function() return "table: 0x" .. string.format("%x", math.random(1048576, 1099511627776)) end,
+        __tostring = function() return addrFake end,
         __pairs = function() return pairs(env) end,
         __len = function() return 0 end,
     })
