@@ -1,3 +1,4 @@
+-- main envlogger
 local fs = require("@lune/fs")
 local process = require("@lune/process")
 local stdio = require("@lune/stdio")
@@ -6449,7 +6450,16 @@ local function createEnv()
     end
     env.getgenv = function() return env end
     env.getrenv = function() return setmetatable({}, { __index = env }) end
-    env.gethui = function() return env.game end
+    local _huiProxy = makeProxy("CoreGui")
+    do
+        local hmt = getmetatable(_huiProxy)
+        hmt._className = "CoreGui"
+        hmt._storedValues["ClassName"] = "CoreGui"
+        hmt._setKeys["ClassName"] = true
+        hmt._storedValues["Name"] = "CoreGui"
+        hmt._setKeys["Name"] = true
+    end
+    env.gethui = function() return _huiProxy end
     env.gethwid = function() return "sandbox-hwid-12345" end
     env.getcustomasset = function() return "rbxasset://temp" end
     env.getinstances = function() return {} end
@@ -6921,6 +6931,7 @@ local function createEnv()
         package = true,
         loadfile = true,
         io = true,
+        os = true,
     }
     setmetatable(env, {
         __index = function(t, k)
@@ -6965,7 +6976,7 @@ local function createEnv()
             if k == "getscriptbytecode" then return function() return "" end end
             if k == "decompile" then return function() return "" end end
             if k == "getscripthash" then return function() return "" end end
-            if k == "gethui" then return function() return env.game end end
+            if k == "gethui" then return function() return _huiProxy end end
             if k == "gethwid" then return function() return "sandbox" end end
             if k == "getcustomasset" then return function() return "rbxasset://temp" end end
             if k == "syn" then return setmetatable({request=function() return {StatusCode=200,Body="",Success=true} end}, {__index=function() return function() return nil end end}) end
@@ -7175,6 +7186,562 @@ local function createEnv()
             end
         end
     end
+
+    local _orig_type = type
+    env.type = function(v)
+        local t = _orig_type(v)
+        if t == "table" then
+            local mt = debug.getmetatable(v)
+            if mt and (mt.__metatable or mt.__type == "Instance") then return "userdata" end
+        end
+        return t
+    end
+
+    env.typeof = function(v)
+        if v == nil then return "nil" end
+        local t = _orig_type(v)
+        if t == "table" then
+            local mt = debug.getmetatable(v)
+            if mt then
+                if mt.__metatable then return "Instance" end
+                if mt.__type then return mt.__type end
+            end
+            return "table"
+        end
+        return t
+    end
+
+    local _orig_getmetatable = getmetatable
+    env.getmetatable = function(obj)
+        local mt = _orig_getmetatable(obj)
+        if mt and _orig_type(mt) == "table" and mt.__metatable then
+            return mt.__metatable
+        end
+        return mt
+    end
+
+    env.getrawmetatable = function(obj)
+        return debug.getmetatable(obj)
+    end
+
+    env.buffer = {
+        create = function(size)
+            return setmetatable({_data={}, _size=size}, {__len=function() return size end})
+        end,
+        writeu32 = function(buf, offset, value)
+            if _orig_type(buf) == "table" and buf._data then
+                buf._data[offset] = value & 0xFF
+                buf._data[offset+1] = (value >> 8) & 0xFF
+                buf._data[offset+2] = (value >> 16) & 0xFF
+                buf._data[offset+3] = (value >> 24) & 0xFF
+            end
+        end,
+        readu32 = function(buf, offset)
+            if _orig_type(buf) == "table" and buf._data then
+                return (buf._data[offset] or 0) | ((buf._data[offset+1] or 0) << 8) |
+                       ((buf._data[offset+2] or 0) << 16) | ((buf._data[offset+3] or 0) << 24)
+            end
+            return 0
+        end,
+        writeu8 = function(buf, offset, value) if buf._data then buf._data[offset] = value & 0xFF end end,
+        readu8 = function(buf, offset) if buf._data then return buf._data[offset] or 0 end return 0 end,
+        writei32 = function(buf, offset, value) env.buffer.writeu32(buf, offset, value) end,
+        readi32 = function(buf, offset) return env.buffer.readu32(buf, offset) end,
+        writestring = function(buf, offset, str) for i=1,#str do buf._data[offset+i-1] = str:byte(i) end end,
+        readstring = function(buf, offset, len) local s="" for i=1,len do s=s..string.char(buf._data[offset+i-1] or 0) end return s end,
+        len = function(buf) return buf._size or 0 end,
+    }
+
+    env.table = env.table or table
+    env.table.freeze = function(t)
+        local mt = debug.getmetatable(t) or {}
+        mt.__frozen = true
+        mt.__newindex = function() error("attempt to modify frozen table") end
+        setmetatable(t, mt)
+        return t
+    end
+    env.table.isfrozen = function(t)
+        local mt = debug.getmetatable(t)
+        return mt and mt.__frozen == true or false
+    end
+
+    local _hiddenProps = setmetatable({}, {__mode = "k"})
+    env.gethiddenproperty = function(inst, prop)
+        if prop == "NetworkIsSleeping" then return false end
+        if _hiddenProps[inst] then return _hiddenProps[inst][prop] end
+        return nil
+    end
+    env.sethiddenproperty = function(inst, prop, val)
+        if not _hiddenProps[inst] then _hiddenProps[inst] = {} end
+        _hiddenProps[inst][prop] = val
+        return true
+    end
+
+    local _cleanEnv = {}
+    for k, v in pairs(env) do
+        local kl = tostring(k):lower()
+        if not (kl == "getgenv" or kl == "getrenv" or kl == "getreg" or kl == "getregistry"
+                or kl == "hookfunction" or kl == "hookmetamethod" or kl == "getrawmetatable"
+                or kl == "setrawmetatable" or kl == "newcclosure" or kl == "checkcaller"
+                or kl == "iscclosure" or kl == "islclosure" or kl == "gethiddenproperty"
+                or kl == "sethiddenproperty" or kl == "getinstances" or kl == "getscripts"
+                or kl == "identifyexecutor" or kl == "gethwid" or kl == "getidentity"
+                or kl == "loadstring" or kl == "request" or kl == "http_request"
+                or kl == "cloneref" or kl == "clonefunction" or kl == "getscriptbytecode"
+                or kl == "decompile" or kl == "getscripthash" or kl == "gethui"
+                or kl == "fireclickdetector" or kl == "fireproximityprompt") then
+            _cleanEnv[k] = v
+        end
+    end
+    env.getfenv = function(level)
+        if _orig_type(level) == "number" then return _cleanEnv end
+        if _orig_type(level) == "function" then return _cleanEnv end
+        return _cleanEnv
+    end
+
+    local _serverTime = os.time() * 1000
+    local function _getServerTimeNow()
+        _serverTime = _serverTime + 1
+        return _serverTime
+    end
+
+    if not env.debug.info and env.debug.getinfo then
+        env.debug.info = function(level, what)
+            if _orig_type(level) == "function" then
+                local info = env.debug.getinfo(level, what)
+                if not info then return nil end
+                if what and what:find("s") then return info.source or "=[C]", info.currentline or 0, info.what or "C", info.linedefined or -1 end
+                if what and what:find("n") then return info.name or "?" end
+                if what and what:find("f") then return info.func end
+                if what and what:find("l") then return info.currentline or 0 end
+                return info
+            end
+            local info = env.debug.getinfo(level + 1, what)
+            if not info then return nil end
+            if what and what:find("s") then return info.source or "=[C]", info.currentline or 0, info.what or "C", info.linedefined or -1 end
+            if what and what:find("n") then return info.name or "?" end
+            if what and what:find("f") then return info.func end
+            if what and what:find("l") then return info.currentline or 0 end
+            return info
+        end
+    end
+
+    if not env.debug.getupvalue then
+        env.debug.getupvalue = function(fn, idx) return nil, nil end
+    end
+    if not env.debug.setupvalue then
+        env.debug.setupvalue = function(fn, idx, val) return nil end
+    end
+
+    local _orig_traceback = env.debug.traceback
+    env.debug.traceback = function(msg, level)
+        local tb = _orig_traceback(msg, level)
+        tb = tb:gsub("[^\n]*[hH]ook[^\n]*\n", "")
+        tb = tb:gsub("[^\n]*[lL]ogger[^\n]*\n", "")
+        tb = tb:gsub("[^\n]*[dD]ump[^\n]*\n", "")
+        tb = tb:gsub("[^\n]*catlog[^\n]*\n", "")
+        return tb
+    end
+
+    local function makeEnumItem(value, name)
+        return setmetatable({Value = value, Name = name, EnumType = "Enum"}, {
+            __type = "EnumItem",
+            __newindex = function() error("attempt to modify enum item") end,
+            __eq = function(a, b) if type(b) == "table" then return a.Value == b.Value end return false end,
+        })
+    end
+    local function makeEnumTable(entries)
+        return setmetatable(entries, {
+            __type = "Enum",
+            __newindex = function() error("attempt to modify enum") end,
+        })
+    end
+    env.Enum = setmetatable({
+        DeveloperMemoryTag = makeEnumTable({
+            HttpCache = makeEnumItem(0, "HttpCache"),
+            Lua = makeEnumItem(1, "Lua"),
+        }),
+        Material = makeEnumTable({
+            Plastic = makeEnumItem(256, "Plastic"),
+            Neon = makeEnumItem(1280, "Neon"),
+        }),
+        MembershipType = makeEnumTable({
+            None = makeEnumItem(0, "None"),
+            Premium = makeEnumItem(4, "Premium"),
+        }),
+        KeyCode = makeEnumTable({
+            E = makeEnumItem(5, "E"),
+            W = makeEnumItem(10, "W"),
+            A = makeEnumItem(15, "A"),
+            S = makeEnumItem(20, "S"),
+            D = makeEnumItem(25, "D"),
+        }),
+        UserInputType = makeEnumTable({
+            MouseButton1 = makeEnumItem(0, "MouseButton1"),
+            MouseButton2 = makeEnumItem(1, "MouseButton2"),
+            Keyboard = makeEnumItem(2, "Keyboard"),
+        }),
+    }, {
+        __index = function(t, k) return makeEnumTable({}) end,
+        __newindex = function() error("attempt to modify enum") end,
+    })
+
+    local _orig_log = math.log
+    env.math = env.math or math
+    env.math.log = function(x, base)
+        if x == nil then error("missing argument #1 to 'log'") end
+        return _orig_log(x, base)
+    end
+
+    local _orig_Instance_new = env.Instance.new
+    env.Instance.new = function(cls, parent)
+        local inst = _orig_Instance_new(cls, parent)
+        if cls == "BindableFunction" then
+            local mt = debug.getmetatable(inst)
+            if mt then
+                local _orig_index = mt.__index
+                mt.__index = function(t, k)
+                    if k == "Invoke" then
+                        return function(self, ...)
+                            if t.OnInvoke then return t.OnInvoke(...) end
+                            return nil
+                        end
+                    end
+                    return _orig_index(t, k)
+                end
+            end
+        end
+        if cls == "Part" then
+            local mt = debug.getmetatable(inst)
+            if mt then
+                local _orig_index = mt.__index
+                mt.__index = function(t, k)
+                    if k == "Anchored" then return false end
+                    if k == "AssemblyLinearVelocity" then return Vector3.new(0, 10, 0) end
+                    return _orig_index(t, k)
+                end
+            end
+        end
+        if cls == "BodyVelocity" then
+            local mt = debug.getmetatable(inst)
+            if mt then
+                mt.__newindex = function(t, k, v) rawset(t, k, v) end
+            end
+        end
+        return inst
+    end
+
+    local _cachedGetService = nil
+    local _game_proxy = env.game
+    if _game_proxy then
+        local _game_mt = debug.getmetatable(_game_proxy)
+        if _game_mt then
+            _cachedGetService = function(self, name)
+                return _game_proxy:GetService(name)
+            end
+            _game_mt.__index = function(self, k)
+                if k == "GetService" or k == "getService" or k == "FindService" then
+                    return _cachedGetService
+                end
+                if k == "PlaceId" then return 1234567890 end
+                if k == "GameId" then return 987654321 end
+                if k == "ClassName" then return "DataModel" end
+                if k == "JobId" then return ""550e8400-e29b-41d4-a716-446655440000"" end
+                if k == "GetJobsInfo" then
+                    return function()
+                        return {{name="Heartbeat",dutyCycle=0.01},{name="Stepped",dutyCycle=0.01},{name="RenderSteps",dutyCycle=0.02}}
+                    end
+                end
+                return nil
+            end
+        end
+    end
+
+    local _ws_proxy = env.workspace
+    if _ws_proxy then
+        local _ws_mt = debug.getmetatable(_ws_proxy)
+        if _ws_mt then
+            _ws_mt.__index = function(self, k)
+                if k == "ClassName" then return "Workspace" end
+                if k == "GetServerTimeNow" then return _getServerTimeNow end
+                if k == "DistributedGameTime" then return os.clock() end
+                if k == "CurrentCamera" then return makeProxy("Camera") end
+                return nil
+            end
+        end
+    end
+
+    local _nc = nil
+    if _game_proxy then
+        _nc = _game_proxy:GetService("NetworkClient")
+    end
+    if _nc then
+        local _nc_mt = debug.getmetatable(_nc)
+        if _nc_mt then
+            _nc_mt.__index = function(self, k)
+                if k == "FindFirstChild" then
+                    return function(self, name)
+                        if name == "ClientReplicator" then return makeProxy("ClientReplicator") end
+                        return nil
+                    end
+                end
+                return nil
+            end
+        end
+    end
+
+    local _chat = nil
+    if _game_proxy then
+        _chat = _game_proxy:GetService("Chat")
+    end
+    if _chat then
+        local _chat_mt = debug.getmetatable(_chat)
+        if _chat_mt then
+            _chat_mt.__index = function(self, k)
+                if k == "Parent" then
+                    local p = makeProxy("ugc")
+                    local pmt = debug.getmetatable(p)
+                    pmt.__index = function(s, key) if key == "Name" then return "ugc" end return nil end
+                    return p
+                end
+                return nil
+            end
+        end
+    end
+
+    local _stats = nil
+    if _game_proxy then _stats = _game_proxy:GetService("Stats") end
+    if _stats then
+        local _stats_mt = debug.getmetatable(_stats)
+        if _stats_mt then
+            _stats_mt.__index = function(self, k)
+                if k == "GetTotalMemoryUsageMb" then return function() return 256.5 end end
+                if k == "GetMemoryUsageMbForTag" then return function() return 12.3 end end
+                return nil
+            end
+        end
+    end
+
+    local _lighting = nil
+    if _game_proxy then _lighting = _game_proxy:GetService("Lighting") end
+    if _lighting then
+        local _clockTime = 14
+        local _light_mt = debug.getmetatable(_lighting)
+        if _light_mt then
+            _light_mt.__index = function(self, k)
+                if k == "GetMinutesAfterMidnight" then return function() return _clockTime * 60 end end
+                if k == "SetMinutesAfterMidnight" then return function(self, m) _clockTime = m / 60 end end
+                if k == "ClockTime" then return _clockTime end
+                return nil
+            end
+        end
+    end
+
+    local _memStorage = nil
+    if _game_proxy then _memStorage = _game_proxy:GetService("MemStorageService") end
+    if _memStorage then
+        local _memData = {}
+        local _ms_mt = debug.getmetatable(_memStorage)
+        if _ms_mt then
+            _ms_mt.__index = function(self, k)
+                if k == "SetItem" then return function(self, key, val) _memData[key] = tostring(val) end end
+                if k == "GetItem" then return function(self, key) return _memData[key] end end
+                return nil
+            end
+        end
+    end
+
+    local _collection = nil
+    if _game_proxy then _collection = _game_proxy:GetService("CollectionService") end
+    if _collection then
+        local _tags = {}
+        local _cs_mt = debug.getmetatable(_collection)
+        if _cs_mt then
+            _cs_mt.__index = function(self, k)
+                if k == "AddTag" then return function(self, inst, tag) _tags[tag] = _tags[tag] or {}; table.insert(_tags[tag], inst) end end
+                if k == "GetTagged" then return function(self, tag) return _tags[tag] or {} end end
+                if k == "RemoveTag" then return function(self, inst, tag)
+                    if _tags[tag] then for i, v in ipairs(_tags[tag]) do if v == inst then table.remove(_tags[tag], i) break end end end
+                end end
+                return nil
+            end
+        end
+    end
+
+    local _sound = nil
+    if _game_proxy then _sound = _game_proxy:GetService("SoundService") end
+    if _sound then
+        local _ss_mt = debug.getmetatable(_sound)
+        if _ss_mt then
+            _ss_mt.__index = function(self, k)
+                if k == "DistanceFactor" then return 3.51 end
+                return nil
+            end
+        end
+    end
+
+    local _runService = nil
+    if _game_proxy then _runService = _game_proxy:GetService("RunService") end
+    if _runService then
+        local _rs_mt = debug.getmetatable(_runService)
+        if _rs_mt then
+            _rs_mt.__index = function(self, k)
+                if k == "Heartbeat" or k == "RenderStepped" or k == "Stepped" then
+                    local signal = makeProxy("RBXScriptSignal")
+                    local sig_mt = debug.getmetatable(signal)
+                    if sig_mt then
+                        sig_mt.__index = function(s, key)
+                            if key == "Connect" then
+                                return function(self, cb)
+                                    local conn = makeProxy("RBXScriptConnection")
+                                    pcall(cb, 0.016)
+                                    pcall(cb, 0.017)
+                                    pcall(cb, 0.015)
+                                    pcall(cb, 0.018)
+                                    pcall(cb, 0.016)
+                                    return conn
+                                end
+                            end
+                            if key == "Wait" then return function() return 0.016 end end
+                            return nil
+                        end
+                    end
+                    return signal
+                end
+                if k == "IsClient" then return function() return true end end
+                if k == "IsServer" then return function() return false end end
+                return nil
+            end
+        end
+    end
+
+    local _httpSvc = nil
+    if _game_proxy then _httpSvc = _game_proxy:GetService("HttpService") end
+    if _httpSvc then
+        local _hs_mt = debug.getmetatable(_httpSvc)
+        if _hs_mt then
+            _hs_mt.__index = function(self, k)
+                if k == "RequestAsync" then
+                    return function(self, opts)
+                        return {Success = true, StatusCode = 200, Body = '{"ip":"192.168.1.1"}', Headers = {}}
+                    end
+                end
+                if k == "GenerateGUID" then
+                    return function(self, wrap)
+                        local g = string.format("%08x-%04x-%04x-%04x-%012x",
+                            math.random(0,0xFFFFFFFF), math.random(0,0xFFFF),
+                            math.random(0,0xFFFF), math.random(0,0xFFFF),
+                            math.random(0,0xFFFFFFFFFFFF))
+                        if wrap then return "{" .. g .. "}" end
+                        return g
+                    end
+                end
+                return nil
+            end
+        end
+    end
+
+    local _players = nil
+    if _game_proxy then _players = _game_proxy:GetService("Players") end
+    if _players then
+        local _pl_mt = debug.getmetatable(_players)
+        if _pl_mt then
+            _pl_mt.__index = function(self, k)
+                if k == "GetCharacterAppearanceInfoAsync" then
+                    return function(self, uid)
+                        return {
+                            assets = {{id = 1, name = "Shirt", assetType = {name = "Shirt"}}},
+                            bodyColors = {leftArmColorId = 1, torsoColorId = 1, rightArmColorId = 1,
+                                         headColorId = 1, leftLegColorId = 1, rightLegColorId = 1},
+                            scales = {bodyType = 1, head = 1, height = 1, proportion = 0, depth = 1, width = 1},
+                        }
+                    end
+                end
+                return nil
+            end
+        end
+    end
+
+    local _marketplace = nil
+    if _game_proxy then _marketplace = _game_proxy:GetService("MarketplaceService") end
+    if _marketplace then
+        local _mp_mt = debug.getmetatable(_marketplace)
+        if _mp_mt then
+            _mp_mt.__index = function(self, k)
+                if k == "PromptPremiumPurchase" then return function() end end
+                return nil
+            end
+        end
+    end
+
+    local _animClip = nil
+    if _game_proxy then _animClip = _game_proxy:GetService("AnimationClipProvider") end
+    if _animClip then
+        local _ac_mt = debug.getmetatable(_animClip)
+        if _ac_mt then
+            _ac_mt.__index = function(self, k)
+                if k == "GetMemStats" then
+                    return function() return {Animations = 10, Memory = 1024, CachedAssets = 5} end
+                end
+                return nil
+            end
+        end
+    end
+
+    local _rs = nil
+    if _game_proxy then _rs = _game_proxy:GetService("ReplicatedStorage") end
+    if _rs then
+        local _rs_mt = debug.getmetatable(_rs)
+        if _rs_mt then
+            _rs_mt.__index = function(self, k)
+                if k == "DefaultChatSystemChatEvents" then
+                    local events = makeProxy("Folder")
+                    local ev_mt = debug.getmetatable(events)
+                    if ev_mt then
+                        ev_mt.__index = function(s, key)
+                            if key == "SetBlockedUserIdsRequest" then
+                                local re = makeProxy("RemoteEvent")
+                                return re
+                            end
+                            return nil
+                        end
+                    end
+                    return events
+                end
+                return nil
+            end
+        end
+    end
+
+    local _c_funcs = {}
+    for k, v in pairs(env) do
+        if _orig_type(v) == "function" then _c_funcs[v] = true end
+        if _orig_type(v) == "table" then
+            for k2, v2 in pairs(v) do
+                if _orig_type(v2) == "function" then _c_funcs[v2] = true end
+            end
+        end
+    end
+    env.iscclosure = function(f) return _c_funcs[f] == true end
+    
+    local _orig_pcall = pcall
+    env._orig_pcall = _orig_pcall
+    env.loadstring = env.loadstring or load
+
+    if not env.newproxy then
+        env.newproxy = function(val)
+            local t = {}
+            if val then
+                setmetatable(t, {
+                    __type = "userdata",
+                    __metatable = "The metatable is locked",
+                })
+            end
+            return t
+        end
+    end
+
+    env._serverTimeNow = _getServerTimeNow
 
     _G._envRef = env
     return env
