@@ -7187,6 +7187,8 @@ local function createEnv()
         end
     end
 
+    local _orig_emit = emit
+    emit = function() end
     local _orig_type = type
     local _lockedObjects = setmetatable({}, {__mode = "k"})
     local function _lockObj(obj) _lockedObjects[obj] = true end
@@ -7519,6 +7521,8 @@ local function createEnv()
 
     env._serverTimeNow = _getServerTimeNow
 
+
+    emit = _orig_emit
     _G._envRef = env
     return env
 end
@@ -7971,7 +7975,7 @@ local function dump(source: string): string
     for k in pairs(frozenTables) do frozenTables[k] = nil end
     for k in pairs(readonlyTables) do readonlyTables[k] = nil end
     for k in pairs(functionAddrMap) do functionAddrMap[k] = nil end
-    emit("-- EnvLog output")
+    
     emit("")
     local env = createEnv()
 
