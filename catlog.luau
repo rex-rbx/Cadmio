@@ -7226,29 +7226,40 @@ local function createEnv()
 
     env.buffer = {
         create = function(size)
-            return setmetatable({_data={}, _size=size}, {__len=function() return size end})
+            return setmetatable({_data = {}, _size = size}, {__len = function() return size end})
         end,
         writeu32 = function(buf, offset, value)
             if _orig_type(buf) == "table" and buf._data then
-                buf._data[offset] = value & 0xFF
-                buf._data[offset+1] = (value >> 8) & 0xFF
-                buf._data[offset+2] = (value >> 16) & 0xFF
-                buf._data[offset+3] = (value >> 24) & 0xFF
+                buf._data[offset] = value % 256
+                buf._data[offset + 1] = math.floor(value / 256) % 256
+                buf._data[offset + 2] = math.floor(value / 65536) % 256
+                buf._data[offset + 3] = math.floor(value / 16777216) % 256
             end
         end,
         readu32 = function(buf, offset)
             if _orig_type(buf) == "table" and buf._data then
-                return (buf._data[offset] or 0) | ((buf._data[offset+1] or 0) << 8) |
-                       ((buf._data[offset+2] or 0) << 16) | ((buf._data[offset+3] or 0) << 24)
+                return (buf._data[offset] or 0) + (buf._data[offset + 1] or 0) * 256 +
+                       (buf._data[offset + 2] or 0) * 65536 + (buf._data[offset + 3] or 0) * 16777216
             end
             return 0
         end,
-        writeu8 = function(buf, offset, value) if buf._data then buf._data[offset] = value & 0xFF end end,
-        readu8 = function(buf, offset) if buf._data then return buf._data[offset] or 0 end return 0 end,
+        writeu8 = function(buf, offset, value)
+            if buf._data then buf._data[offset] = value % 256 end
+        end,
+        readu8 = function(buf, offset)
+            if buf._data then return buf._data[offset] or 0 end
+            return 0
+        end,
         writei32 = function(buf, offset, value) env.buffer.writeu32(buf, offset, value) end,
         readi32 = function(buf, offset) return env.buffer.readu32(buf, offset) end,
-        writestring = function(buf, offset, str) for i=1,#str do buf._data[offset+i-1] = str:byte(i) end end,
-        readstring = function(buf, offset, len) local s="" for i=1,len do s=s..string.char(buf._data[offset+i-1] or 0) end return s end,
+        writestring = function(buf, offset, str)
+            for i = 1, #str do buf._data[offset + i - 1] = str:byte(i) end
+        end,
+        readstring = function(buf, offset, len)
+            local s = ""
+            for i = 1, len do s = s .. string.char(buf._data[offset + i - 1] or 0) end
+            return s
+        end,
         len = function(buf) return buf._size or 0 end,
     }
 
@@ -7446,10 +7457,10 @@ local function createEnv()
                 if k == "PlaceId" then return 1234567890 end
                 if k == "GameId" then return 987654321 end
                 if k == "ClassName" then return "DataModel" end
-                if k == "JobId" then return ""550e8400-e29b-41d4-a716-446655440000"" end
+                if k == "JobId" then return "job-1234567" end
                 if k == "GetJobsInfo" then
                     return function()
-                        return {{name="Heartbeat",dutyCycle=0.01},{name="Stepped",dutyCycle=0.01},{name="RenderSteps",dutyCycle=0.02}}
+                        return {{name = "Heartbeat", dutyCycle = 0.01}, {name = "Stepped", dutyCycle = 0.01}, {name = "RenderSteps", dutyCycle = 0.02}}
                     end
                 end
                 return nil
@@ -7472,9 +7483,7 @@ local function createEnv()
     end
 
     local _nc = nil
-    if _game_proxy then
-        _nc = _game_proxy:GetService("NetworkClient")
-    end
+    if _game_proxy then _nc = _game_proxy:GetService("NetworkClient") end
     if _nc then
         local _nc_mt = debug.getmetatable(_nc)
         if _nc_mt then
@@ -7491,9 +7500,7 @@ local function createEnv()
     end
 
     local _chat = nil
-    if _game_proxy then
-        _chat = _game_proxy:GetService("Chat")
-    end
+    if _game_proxy then _chat = _game_proxy:GetService("Chat") end
     if _chat then
         local _chat_mt = debug.getmetatable(_chat)
         if _chat_mt then
@@ -7629,9 +7636,9 @@ local function createEnv()
                 if k == "GenerateGUID" then
                     return function(self, wrap)
                         local g = string.format("%08x-%04x-%04x-%04x-%012x",
-                            math.random(0,0xFFFFFFFF), math.random(0,0xFFFF),
-                            math.random(0,0xFFFF), math.random(0,0xFFFF),
-                            math.random(0,0xFFFFFFFFFFFF))
+                            math.random(0, 4294967295), math.random(0, 65535),
+                            math.random(0, 65535), math.random(0, 65535),
+                            math.random(0, 281474976710655))
                         if wrap then return "{" .. g .. "}" end
                         return g
                     end
@@ -7700,8 +7707,7 @@ local function createEnv()
                     if ev_mt then
                         ev_mt.__index = function(s, key)
                             if key == "SetBlockedUserIdsRequest" then
-                                local re = makeProxy("RemoteEvent")
-                                return re
+                                return makeProxy("RemoteEvent")
                             end
                             return nil
                         end
@@ -7723,9 +7729,7 @@ local function createEnv()
         end
     end
     env.iscclosure = function(f) return _c_funcs[f] == true end
-    
-    local _orig_pcall = pcall
-    env._orig_pcall = _orig_pcall
+
     env.loadstring = env.loadstring or load
 
     if not env.newproxy then
