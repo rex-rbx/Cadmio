@@ -6199,62 +6199,7 @@ local function createEnv()
     env.OverlapParams = newCtor("OverlapParams")
     env.PathWaypoint = newCtor("PathWaypoint")
     env.Font = setmetatable({}, { __index = function(_, k) return makeProxy("Font." .. tostring(k)) end })
-    env.buffer = setmetatable({
-        create = function(n)
-            if type(n) ~= "number" then n = 0 end
-            if n < 0 then n = 0 end
-            if n > 100000000 then n = 100000000 end
-            return buffer.create(math.floor(n))
-        end,
-        fromstring = function(s)
-            s = s or ""
-            return buffer.fromstring(s)
-        end,
-        tostring = function(b)
-            if type(b) == "string" then return b end
-            local ok, r = pcall(buffer.tostring, b)
-            if ok then return r end
-            return ""
-        end,
-        len = function(b)
-            if type(b) == "string" then return #b end
-            local ok, r = pcall(buffer.len, b)
-            if ok then return r end
-            return 0
-        end,
-        copy = function(...) return buffer.copy(...) end,
-        fill = function(...) return buffer.fill(...) end,
-        tobits = function(b) return buffer.tobits(b) end,
-        frombits = function(...) return buffer.frombits(...) end,
-        readi8 = function(...) return buffer.readi8(...) end,
-        readu8 = function(...) return buffer.readu8(...) end,
-        readi16 = function(...) return buffer.readi16(...) end,
-        readu16 = function(...) return buffer.readu16(...) end,
-        readi32 = function(...) return buffer.readi32(...) end,
-        readu32 = function(...) return buffer.readu32(...) end,
-        readf32 = function(...) return buffer.readf32(...) end,
-        readf64 = function(...) return buffer.readf64(...) end,
-        writei8 = function(...) return buffer.writei8(...) end,
-        writeu8 = function(...) return buffer.writeu8(...) end,
-        writei16 = function(...) return buffer.writei16(...) end,
-        writeu16 = function(...) return buffer.writeu16(...) end,
-        writei32 = function(...) return buffer.writei32(...) end,
-        writeu32 = function(...) return buffer.writeu32(...) end,
-        writef32 = function(...) return buffer.writef32(...) end,
-        writef64 = function(...) return buffer.writef64(...) end,
-        readstring = function(...) return buffer.readstring(...) end,
-        writestring = function(...) return buffer.writestring(...) end,
-    }, {
-        _serialName = "buffer",
-        __index = function(_, k)
-            if type(k) == "string" and buffer[k] then
-                return buffer[k]
-            end
-            return function() return 0 end
-        end,
-        __tostring = function() return "table: 0x" .. string.format("%x", math.random(1048576, 1099511627776)) end,
-    })
-    env.Buffer = env.buffer
+    env.buffer = buffer --// lune has buffer, no need to make a fake buffer
 
     local YIELD_BUDGET = 1000
     local yieldCount = 0
