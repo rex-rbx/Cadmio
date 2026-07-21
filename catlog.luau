@@ -7187,6 +7187,7 @@ local function createEnv()
         end
     end
 
+
     local _orig_emit = emit
     emit = function() end
     local _orig_type = type
@@ -7197,7 +7198,9 @@ local function createEnv()
         local t = _orig_type(v)
         if t == "table" then
             local mt = getmetatable(v)
-            if mt and _orig_type(mt) == "table" and (mt.__metatable or mt.__type == "Instance") then return "userdata" end
+            if mt and _orig_type(mt) == "table" then
+                if mt.__type or mt._isProxy then return "userdata" end
+            end
             if _lockedObjects[v] then return "userdata" end
         end
         return t
@@ -7210,6 +7213,7 @@ local function createEnv()
             local mt = getmetatable(v)
             if mt and _orig_type(mt) == "table" then
                 if mt.__type then return mt.__type end
+                if mt._isProxy then return rawget(mt, "_ctorName") or mt._ctorName or "Instance" end
             end
             if _lockedObjects[v] then return "Instance" end
             return "table"
@@ -7221,7 +7225,10 @@ local function createEnv()
     env.getmetatable = function(obj)
         if _lockedObjects[obj] then return "The metatable is locked" end
         local mt = _orig_getmetatable(obj)
-        if mt and _orig_type(mt) == "table" and mt.__metatable then return mt.__metatable end
+        if mt and _orig_type(mt) == "table" then
+            local mm = rawget(mt, "__metatable")
+            if mm and (_orig_type(mm) == "string" or _orig_type(mm) == "boolean") then return mm end
+        end
         return mt
     end
 
@@ -7258,29 +7265,16 @@ local function createEnv()
     }
 
     env.table = env.table or table
-    env.table.freeze = function(t)
-        local mt = _orig_getmetatable(t) or {}
-        mt.__frozen = true
-        mt.__newindex = function() error("attempt to modify frozen table") end
-        setmetatable(t, mt)
-        return t
-    end
-    env.table.isfrozen = function(t)
-        local mt = _orig_getmetatable(t)
-        return mt ~= nil and mt.__frozen == true or false
+    if table.freeze then
+        env.table.freeze = table.freeze
+        env.table.isfrozen = table.isfrozen
+    else
+        env.table.freeze = function(t) local mt = _orig_getmetatable(t) or {} mt.__frozen = true mt.__newindex = function() error("attempt to modify frozen table") end setmetatable(t, mt) return t end
+        env.table.isfrozen = function(t) local mt = _orig_getmetatable(t) return mt ~= nil and mt.__frozen == true or false end
     end
 
-    local _hiddenProps = setmetatable({}, {__mode = "k"})
-    env.gethiddenproperty = function(inst, prop)
-        if prop == "NetworkIsSleeping" then return false end
-        if _hiddenProps[inst] then return _hiddenProps[inst][prop] end
-        return nil
-    end
-    env.sethiddenproperty = function(inst, prop, val)
-        if not _hiddenProps[inst] then _hiddenProps[inst] = {} end
-        _hiddenProps[inst][prop] = val
-        return true
-    end
+    env.gethiddenproperty = function() error("gethiddenproperty is not available") end
+    env.sethiddenproperty = function() error("sethiddenproperty is not available") end
 
     local _cleanEnv = {}
     for k, v in pairs(env) do
@@ -7329,17 +7323,31 @@ local function createEnv()
     end
 
     if not env.debug.getupvalue then env.debug.getupvalue = function(fn, idx) return nil, nil end end
-    if not env.debug.setupvalue then env.debug.setupvalue = function(fn, idx, val) return nil end end
 
-    local _orig_traceback = env.debug.traceback
-    env.debug.traceback = function(msg, level)
-        local tb = _orig_traceback(msg, level)
+    local _debugCopy = {}
+    for k, v in pairs(env.debug) do _debugCopy[k] = v end
+    _debugCopy.getinfo = nil
+    local _orig_debug_info = _debugCopy.info
+    _debugCopy.info = function(level, what)
+        local results = table.pack(_orig_debug_info(level, what))
+        if what and what:find("f") and results[1] == nil then
+            results[1] = function() end
+        end
+        return table.unpack(results, 1, results.n)
+    end
+    local _orig_tb = _debugCopy.traceback
+    _debugCopy.traceback = function(msg, level)
+        local tb = _orig_tb(msg, level)
         tb = tb:gsub("[^\n]*[hH]ook[^\n]*\n", "")
         tb = tb:gsub("[^\n]*[lL]ogger[^\n]*\n", "")
         tb = tb:gsub("[^\n]*[dD]ump[^\n]*\n", "")
         tb = tb:gsub("[^\n]*catlog[^\n]*\n", "")
         return tb
     end
+    env.debug = _debugCopy
+
+    if not env.debug.setupvalue then env.debug.setupvalue = function(fn, idx, val) return nil end end
+
 
     local function makeEnumItem(value, name)
         return setmetatable({Value = value, Name = name, EnumType = "Enum"}, {
@@ -7382,6 +7390,31 @@ local function createEnv()
                 end
             end
         end
+        return inst
+    end
+
+    local _orig_Instance_new2 = env.Instance.new
+    env.Instance.new = function(cls, parent)
+        if cls == "BindableFunction" then
+            local bf = {}
+            local _onInvoke = nil
+            setmetatable(bf, {
+                __index = function(t, k)
+                    if k == "OnInvoke" then return _onInvoke end
+                    if k == "Invoke" then return function(self, ...) if _onInvoke then return _onInvoke(...) end return nil end end
+                    if k == "Destroy" then return function() end end
+                    if k == "ClassName" then return "BindableFunction" end
+                    if k == "Parent" then return nil end
+                    return nil
+                end,
+                __newindex = function(t, k, v)
+                    if k == "OnInvoke" then _onInvoke = v end
+                end,
+                __tostring = function() return "BindableFunction" end,
+            })
+            return bf
+        end
+        local inst = _orig_Instance_new2(cls, parent)
         return inst
     end
 
@@ -7506,12 +7539,11 @@ local function createEnv()
         end)
     end
 
-    local _c_funcs = {}
-    for k, v in pairs(env) do
-        if _orig_type(v) == "function" then _c_funcs[v] = true end
-        if _orig_type(v) == "table" then for k2, v2 in pairs(v) do if _orig_type(v2) == "function" then _c_funcs[v2] = true end end end
+    env.iscclosure = function(f)
+        if _orig_type(f) ~= "function" then return false end
+        local source = env.debug.info(f, "s")
+        return source == "[C]"
     end
-    env.iscclosure = function(f) return _c_funcs[f] == true end
 
     env.loadstring = env.loadstring or load
 
@@ -7519,6 +7551,33 @@ local function createEnv()
         env.newproxy = function(val) local t = {} if val then setmetatable(t, {__type = "userdata", __metatable = "The metatable is locked"}) end return t end
     end
 
+
+    env.gethiddenproperty = function() error("gethiddenproperty is not available") end
+    env.sethiddenproperty = function() error("sethiddenproperty is not available") end
+
+    local _real_tostring = tostring
+    local _orig_env_tostring = nil
+    local _orig_env_mt = getmetatable(env)
+    if _orig_env_mt and _orig_env_mt.__index then
+        _orig_env_tostring = rawget(env, "tostring")
+    end
+    if not _orig_env_tostring then
+        for k, v in pairs(env) do
+            if k == "tostring" then _orig_env_tostring = v break end
+        end
+    end
+    env.tostring = function(v)
+        if _orig_type(v) == "table" then
+            local mt = _orig_getmetatable(v)
+            if _orig_type(mt) ~= "table" then
+                return _real_tostring(v)
+            end
+        end
+        if _orig_env_tostring then
+            return _orig_env_tostring(v)
+        end
+        return _real_tostring(v)
+    end
     env._serverTimeNow = _getServerTimeNow
 
 
