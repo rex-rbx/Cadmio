@@ -7233,7 +7233,19 @@ local function createEnv()
     end
 
     env.getrawmetatable = function(obj)
-        return _orig_getmetatable(obj)
+        local mt = _orig_getmetatable(obj)
+        if mt and _orig_type(mt) == "table" then
+            local orig_idx = rawget(mt, "__index")
+            local orig_nc = rawget(mt, "__namecall")
+            local orig_ni = rawget(mt, "__newindex")
+            if orig_idx and not rawget(mt, "_isFakeC") then
+                rawset(mt, "_realIndex", orig_idx)
+                rawset(mt, "_isFakeC", true)
+                local fakeC = function() end
+                rawset(mt, "__index", orig_idx)
+            end
+        end
+        return mt
     end
 
     env.buffer = {
@@ -7323,28 +7335,6 @@ local function createEnv()
     end
 
     if not env.debug.getupvalue then env.debug.getupvalue = function(fn, idx) return nil, nil end end
-
-    local _debugCopy = {}
-    for k, v in pairs(env.debug) do _debugCopy[k] = v end
-    _debugCopy.getinfo = nil
-    local _orig_debug_info = _debugCopy.info
-    _debugCopy.info = function(level, what)
-        local results = table.pack(_orig_debug_info(level, what))
-        if what and what:find("f") and results[1] == nil then
-            results[1] = function() end
-        end
-        return table.unpack(results, 1, results.n)
-    end
-    local _orig_tb = _debugCopy.traceback
-    _debugCopy.traceback = function(msg, level)
-        local tb = _orig_tb(msg, level)
-        tb = tb:gsub("[^\n]*[hH]ook[^\n]*\n", "")
-        tb = tb:gsub("[^\n]*[lL]ogger[^\n]*\n", "")
-        tb = tb:gsub("[^\n]*[dD]ump[^\n]*\n", "")
-        tb = tb:gsub("[^\n]*catlog[^\n]*\n", "")
-        return tb
-    end
-    env.debug = _debugCopy
 
     if not env.debug.setupvalue then env.debug.setupvalue = function(fn, idx, val) return nil end end
 
@@ -7539,11 +7529,6 @@ local function createEnv()
         end)
     end
 
-    env.iscclosure = function(f)
-        if _orig_type(f) ~= "function" then return false end
-        local source = env.debug.info(f, "s")
-        return source == "[C]"
-    end
 
     env.loadstring = env.loadstring or load
 
@@ -7577,6 +7562,75 @@ local function createEnv()
             return _orig_env_tostring(v)
         end
         return _real_tostring(v)
+    end
+
+    local _orig_debug_table = env.debug
+    local _orig_debug_mt = getmetatable(_orig_debug_table)
+    local _orig_debug_idx = _orig_debug_mt and _orig_debug_mt.__index or function(t, k) return rawget(t, k) end
+    
+    local function _sanitize_source(s)
+        if type(s) ~= "string" then return s end
+        return s:gsub("catlog", "script"):gsub("dump", "data"):gsub("envlog", "runtime"):gsub("deobf", "code")
+    end
+    
+    env.debug = setmetatable({}, {
+        __index = function(t, k)
+            local v = rawget(_orig_debug_table, k)
+            if v == nil then v = _orig_debug_idx(_orig_debug_table, k) end
+            
+            if k == "info" and type(v) == "function" then
+                return function(f, what)
+                    local results = table.pack(v(f, what))
+                    for i = 1, results.n do
+                        if type(results[i]) == "string" then
+                            results[i] = _sanitize_source(results[i])
+                        end
+                    end
+                    return table.unpack(results, 1, results.n)
+                end
+            end
+            
+            if k == "getinfo" and type(v) == "function" then
+                return function(f, what)
+                    local info = v(f, what)
+                    if type(info) == "table" then
+                        if info.source then info.source = _sanitize_source(info.source) end
+                        if info.short_src then info.short_src = _sanitize_source(info.short_src) end
+                    end
+                    return info
+                end
+            end
+            
+            if k == "traceback" and type(v) == "function" then
+                return function(msg, level)
+                    local tb = v(msg, level)
+                    tb = tb:gsub("[^\n]*[hH]ook[^\n]*\n", "")
+                    tb = tb:gsub("[^\n]*[lL]ogger[^\n]*\n", "")
+                    tb = tb:gsub("[^\n]*[dD]ump[^\n]*\n", "")
+                    tb = tb:gsub("[^\n]*catlog[^\n]*\n", "")
+                    return tb
+                end
+            end
+            
+            return v
+        end,
+        __newindex = function(t, k, v) rawset(t, k, v) end,
+    })
+    local _game_mt2 = _orig_getmetatable(env.game)
+    if _game_mt2 then
+        local _idx = rawget(_game_mt2, "__index")
+        local _nc = rawget(_game_mt2, "__namecall")
+        local _ni = rawget(_game_mt2, "__newindex")
+        if knownCFunctions then
+            if _idx then knownCFunctions[_idx] = true end
+            if _nc then knownCFunctions[_nc] = true end
+            if _ni then knownCFunctions[_ni] = true end
+        end
+        if cclosureSet then
+            if _idx then cclosureSet[_idx] = true end
+            if _nc then cclosureSet[_nc] = true end
+            if _ni then cclosureSet[_ni] = true end
+        end
     end
     env._serverTimeNow = _getServerTimeNow
 
