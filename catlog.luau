@@ -7312,28 +7312,7 @@ local function createEnv()
 
     local _serverTime = os.time() * 1000
     local function _getServerTimeNow() _serverTime = _serverTime + 1 return _serverTime end
-
-    if not env.debug.info and env.debug.getinfo then
-        env.debug.info = function(level, what)
-            if _orig_type(level) == "function" then
-                local info = env.debug.getinfo(level, what)
-                if not info then return nil end
-                if what and what:find("s") then return info.source or "=[C]", info.currentline or 0, info.what or "C", info.linedefined or -1 end
-                if what and what:find("n") then return info.name or "?" end
-                if what and what:find("f") then return info.func end
-                if what and what:find("l") then return info.currentline or 0 end
-                return info
-            end
-            local info = env.debug.getinfo(level + 1, what)
-            if not info then return nil end
-            if what and what:find("s") then return info.source or "=[C]", info.currentline or 0, info.what or "C", info.linedefined or -1 end
-            if what and what:find("n") then return info.name or "?" end
-            if what and what:find("f") then return info.func end
-            if what and what:find("l") then return info.currentline or 0 end
-            return info
-        end
-    end
-
+    -- you REALLY DO NOT NEED to add a custom debug.info. It already supports debug.info in lune!
     if not env.debug.getupvalue then env.debug.getupvalue = function(fn, idx) return nil, nil end end
 
     if not env.debug.setupvalue then env.debug.setupvalue = function(fn, idx, val) return nil end end
